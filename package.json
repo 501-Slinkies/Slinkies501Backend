@@ -1,0 +1,22 @@
+{
+    "name": "firestore-idx-blank",
+    "version": "1.0.0",
+    "description": "Blank Node.js project with Firestore connection",
+    "main": "index.js",
+    "dependencies": {
+        "@faker-js/faker": "9.1.0",
+        "bcrypt": "^6.0.0",
+        "body-parser": "^2.2.0",
+        "csv-parser": "^3.2.0",
+        "express": "^5.1.0",
+        "firebase-admin": "^12.1.1",
+        "fs": "^0.0.1-security"
+    },
+    "scripts": {
+        "test": "node test.js",
+        "emulator": "firebase emulators:start"
+    },
+    "devDependencies": {
+        "firebase-tools": "^14.17.0"
+    }
+}
