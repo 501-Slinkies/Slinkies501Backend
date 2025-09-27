@@ -1,0 +1,34 @@
+name: Test & Deploy to Dev
+
+on:
+  push:
+    branches:
+      - dev
+
+jobs:
+  test-and-deploy:                   # Deploys an ubuntu VM for testing which is destroyed afterwards
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies  # Clean installs our dependencies to the VM
+        run: npm ci
+
+      - name: Run tests             # Runs our test scripts (declared in package.json)
+        run: npm test
+
+      - name: Deploy to Firebase Dev
+        if: success()   # only deploy if tests pass
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: "${{ secrets.GITHUB_TOKEN }}"
+          firebaseServiceAccount: "${{ secrets.FIREBASE_SERVICE_ACCOUNT_DEV }}"
+          channelId: live
+          projectId: slinkies-43455
