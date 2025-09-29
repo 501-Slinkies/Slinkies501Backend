@@ -120,6 +120,43 @@ app.post('/roles', async (req, res) => {
   }
 });
 
+// Endpoint to match drivers for a specific ride
+app.get('/rides/:rideId/match-drivers', async (req, res) => {
+  try {
+    const { rideId } = req.params;
+    
+    if (!rideId) {
+      return res.status(400).send({
+        success: false,
+        message: 'Ride ID is required'
+      });
+    }
+    
+    const result = await applicationLayer.matchDriversForRide(rideId);
+    
+    if (result.success) {
+      res.status(200).send(result);
+    } else {
+      // Determine appropriate status code based on error type
+      let statusCode = 500;
+      if (result.message.includes('not found') || result.message.includes('Invalid')) {
+        statusCode = 404;
+      } else if (result.message.includes('Failed to fetch')) {
+        statusCode = 500;
+      }
+      
+      res.status(statusCode).send(result);
+    }
+  } catch (error) {
+    console.error('Error in /rides/:rideId/match-drivers endpoint:', error);
+    res.status(500).send({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+});
+
 app.listen(port, () => {
   console.log(`Server is running on http://localhost:${port}`);
 });

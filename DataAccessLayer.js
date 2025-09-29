@@ -96,4 +96,42 @@ async function createPermission(permissionData) {
   }
 }
 
-module.exports = { login, createRole, createPermission };
+async function getAllVolunteers() {
+  const db = getFirestore();
+  try {
+    const volunteersRef = db.collection("volunteers");
+    const snapshot = await volunteersRef.get();
+    
+    const volunteers = [];
+    snapshot.forEach(doc => {
+      volunteers.push({
+        id: doc.id,
+        ...doc.data()
+      });
+    });
+    
+    return { success: true, volunteers: volunteers };
+  } catch (error) {
+    console.error("Error fetching volunteers:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+async function getRideById(rideId) {
+  const db = getFirestore();
+  try {
+    const rideRef = db.collection("rides").doc(rideId);
+    const doc = await rideRef.get();
+    
+    if (!doc.exists) {
+      return { success: false, error: "Ride not found" };
+    }
+    
+    return { success: true, ride: { id: doc.id, ...doc.data() } };
+  } catch (error) {
+    console.error("Error fetching ride:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+module.exports = { login, createRole, createPermission, getAllVolunteers, getRideById };
