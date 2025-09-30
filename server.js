@@ -3,6 +3,7 @@ const bodyParser = require('body-parser');
 const { initializeApp, cert } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
 const applicationLayer = require('./ApplicationLayer');
+const calendarRoutes = require("./calendar");
 
 // Conditionally initialize Firebase Admin SDK
 if (process.env.FIRESTORE_EMULATOR_HOST) {
@@ -44,5 +45,8 @@ app.post('/login', async (req, res) => {
 app.listen(port, () => {
   console.log(`Server is running on http://localhost:${port}`);
 });
+
+app.use('/api/calender', calendarRoutes);
+
 
 module.exports = { app, db };
