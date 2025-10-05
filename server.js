@@ -48,5 +48,9 @@ app.listen(port, () => {
 
 app.use('/api/calendar', calendarRoutes);
 
+app.get('/', (req, res) => {
+  res.send('🚀 Server is running!');
+});
+
 
 module.exports = {app, db};
