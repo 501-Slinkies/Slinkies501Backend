@@ -1,29 +1,22 @@
 // Set up a calendar
 
 const express = require('express');
-const appLayer = require('./ApplicationLayer');
 const router = express.Router();
-
+const applicationLayer = require('./ApplicationLayer');
 
 router.get('/', async (req, res) => {
-  const result = await appLayer.listAllEvents();
-  res.json(result);
-});
+  try {
+    const { startDate, endDate } = req.query;
+    if (!startDate || !endDate) {
+      return res.status(400).json({ message: 'startDate and endDate are required' });
+    }
 
-router.get('/:id', async (req, res) => {
-  const result = await appLayer.getEventById(req.params.id);
-  res.status(result.success ? 200 : 404).json(result);
+    const rides = await applicationLayer.getRidesByTimeframe(startDate, endDate);
+    res.json(rides);
+  } catch (error) {
+    console.error('Error fetching rides:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
 });
-
-router.post('/', async (req, res) => {
-  const result = await appLayer.createEvent(req.body);
-  res.status(result.success ? 201 : 400).json(result);
-});
-
-router.put('/:id', async (req, res) => {
-  const result = await appLayer.updateEvent(req.params.id, req.body);
-  res.json(result);
-});
-
 
 module.exports = router;
