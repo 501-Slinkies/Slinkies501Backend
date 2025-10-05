@@ -15,4 +15,25 @@ async function loginUser(email, password, role) {
   }
 }
 
-module.exports = { loginUser };
+// Calendar function (startDate, endDate)
+async function getRidesByTimeframe(startDate, endDate) {
+  const allRides = await dataAccess.fetchRidesInRange(startDate, endDate);
+
+  const grouped = {
+    assigned: [],
+    unassigned: [],
+    completed: [],
+    canceled: []
+  };
+
+  for (const ride of allRides) {
+    if (ride.status === 'assigned') grouped.assigned.push(ride);
+    else if (ride.status === 'unassigned') grouped.unassigned.push(ride);
+    else if (ride.status === 'completed') grouped.completed.push(ride);
+    else if (ride.status === 'canceled') grouped.canceled.push(ride);
+  }
+
+  return grouped;
+}
+
+module.exports = {loginUser, getRidesByTimeframe};
