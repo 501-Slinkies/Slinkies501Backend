@@ -26,4 +26,24 @@ async function login(email, password, role) {
   return user;
 }
 
-module.exports = { login };
+// Add a function below your login function
+async function fetchRidesInRange(startDate, endDate) {
+  const db = getFirestore();
+  const ridesRef = db.collection('rides');
+
+  const snapshot = await ridesRef
+    .where('date', '>=', startDate)
+    .where('date', '<=', endDate)
+    .get();
+
+  if (snapshot.empty) return [];
+
+  const rides = [];
+  snapshot.forEach(doc => {
+    rides.push({ id: doc.id, ...doc.data() });
+  });
+
+  return rides;
+}
+
+module.exports = {login, fetchRidesInRange};
