@@ -46,7 +46,9 @@ app.listen(port, () => {
   console.log(`Server is running on http://localhost:${port}`);
 });
 
-app.use('/api/calender', calendarRoutes);
 
 
-module.exports = { app, db };
+app.use('/api/calendar', calendarRoutes);
+
+
+module.exports = {app, db};
