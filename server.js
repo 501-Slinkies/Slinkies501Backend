@@ -50,5 +50,4 @@ app.listen(port, () => {
 
 app.use('/api/calendar', calendarRoutes);
 
-
 module.exports = {app, db};
