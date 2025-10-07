@@ -121,6 +121,8 @@ app.post('/roles', async (req, res) => {
 });
 
 // Endpoint to match drivers for a specific ride
+// This endpoint takes a ride document ID and returns available/unavailable drivers
+// based on their availability and the ride's timeframe (PickupTime, AppointmentTime, EstimatedDuration, TripType)
 app.get('/rides/:rideId/match-drivers', async (req, res) => {
   try {
     const { rideId } = req.params;

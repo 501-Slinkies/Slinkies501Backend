@@ -99,6 +99,7 @@ async function createPermission(permissionData) {
 async function getAllVolunteers() {
   const db = getFirestore();
   try {
+    // Use "volunteers" (lowercase) as shown in your Firestore console
     const volunteersRef = db.collection("volunteers");
     const snapshot = await volunteersRef.get();
     
@@ -117,11 +118,39 @@ async function getAllVolunteers() {
   }
 }
 
+async function getVolunteersByOrganization(organizationId) {
+  const db = getFirestore();
+  try {
+    const volunteersRef = db.collection("volunteers");
+    const snapshot = await volunteersRef.where("OrganizationID", "==", organizationId).get();
+    
+    const volunteers = [];
+    snapshot.forEach(doc => {
+      volunteers.push({
+        id: doc.id,
+        ...doc.data()
+      });
+    });
+    
+    return { success: true, volunteers: volunteers };
+  } catch (error) {
+    console.error("Error fetching volunteers by organization:", error);
+    return { success: false, error: error.message };
+  }
+}
+
 async function getRideById(rideId) {
   const db = getFirestore();
   try {
-    const rideRef = db.collection("rides").doc(rideId);
-    const doc = await rideRef.get();
+    // Try both "Rides" (capital R) and "rides" (lowercase) for compatibility
+    let rideRef = db.collection("Rides").doc(rideId);
+    let doc = await rideRef.get();
+    
+    if (!doc.exists) {
+      // Fallback to lowercase if not found
+      rideRef = db.collection("rides").doc(rideId);
+      doc = await rideRef.get();
+    }
     
     if (!doc.exists) {
       return { success: false, error: "Ride not found" };
@@ -134,4 +163,4 @@ async function getRideById(rideId) {
   }
 }
 
-module.exports = { login, createRole, createPermission, getAllVolunteers, getRideById };
+module.exports = { login, createRole, createPermission, getAllVolunteers, getVolunteersByOrganization, getRideById };
