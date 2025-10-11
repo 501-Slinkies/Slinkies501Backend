@@ -8,6 +8,8 @@ const ridesRouter = require("./routes/rides");
 const clientsRouter = require("./routes/clients");   // ✅ NEW - Donations reporting route
 const { verifyAddress, getRoute } = require("./integrations/maps");
 const { sendNotification } = require("./services/notifications");
+const reportsRouter = require("./routes/reports");
+
 
 const app = express();
 const port = 3000;
@@ -85,7 +87,13 @@ app.use('/api/rides', ridesRouter);
 // ================================
 // Clients / Donations Reporting
 // ================================
-app.use('/api/clients', clientsRouter);   // ✅ NEW
+app.use('/api/clients', clientsRouter);
+
+
+// ================================
+// Reports
+// ================================
+app.use("/api/reports", reportsRouter);
 
 // ================================
 // Root Endpoint
