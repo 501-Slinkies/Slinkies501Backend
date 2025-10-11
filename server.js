@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
 const { db } = require('./firebase');         
@@ -5,17 +6,18 @@ const applicationLayer = require('./ApplicationLayer');
 const calendarRoutes = require("./calendar");
 const ridesRouter = require("./routes/rides");
 const { verifyAddress, getRoute } = require("./integrations/maps");
+const { sendNotification } = require("./services/notifications");
 
 const app = express();
 const port = 3000;
 
 // ================================
-// 🧠 Middleware
+// Middleware
 // ================================
 app.use(bodyParser.json());
 
 // ================================
-// 🔐 Login Endpoint
+// Login Endpoint
 // ================================
 app.post('/login', async (req, res) => {
   const { email, password, role } = req.body;
@@ -32,7 +34,7 @@ app.post('/login', async (req, res) => {
 });
 
 // ================================
-// 🗺️ Maps API Endpoints (OpenStreetMap)
+// Maps API Endpoints (OpenStreetMap)
 // ================================
 
 /**
@@ -60,20 +62,43 @@ app.get("/api/maps/route", async (req, res) => {
 });
 
 // ================================
-// 📅 Calendar Endpoints
+// Notification Endpoint (Twilio + SendGrid)
 // ================================
-app.use('/api/calendar', calendarRoutes); // Existing calendar routes
-app.use('/api/rides', ridesRouter);       // ✅ New rides calendar endpoint
+
+/**
+ * Send notification to a user by ID
+ * Body: { "userId": "abc123", "message": "Your ride is confirmed", "type": "sms" }
+ */
+app.post("/api/notify", async (req, res) => {
+  const { userId, message, type } = req.body;
+
+  if (!userId || !message || !type) {
+    return res.status(400).json({ success: false, message: "Missing userId, message, or type" });
+  }
+
+  const result = await sendNotification(userId, message, type);
+  if (result.success) {
+    res.json({ success: true });
+  } else {
+    res.status(500).json(result);
+  }
+});
 
 // ================================
-// 🟢 Root Endpoint
+// Calendar Endpoints
+// ================================
+app.use('/api/calendar', calendarRoutes); // Existing calendar routes
+app.use('/api/rides', ridesRouter);       // New rides calendar endpoint
+
+// ================================
+// Root Endpoint
 // ================================
 app.get('/', (req, res) => {
   res.send('🚀 Server is running!');
 });
 
 // ================================
-// 🟡 Start Server
+// Start Server
 // ================================
 app.listen(port, () => {
   console.log(`✅ Server is running on http://localhost:${port}`);
