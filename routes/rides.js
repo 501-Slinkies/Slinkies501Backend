@@ -3,7 +3,7 @@
 
 const express = require("express");
 const router = express.Router();
-const { db } = require("../server");  // ✅ Import the initialized db
+const { db } = require("../firebase"); // No more circular dependency
 
 
 /**
