@@ -1,34 +1,21 @@
 const express = require('express');
 const bodyParser = require('body-parser');
-const { initializeApp, cert } = require('firebase-admin/app');
-const { getFirestore } = require('firebase-admin/firestore');
+const { db } = require('./firebase');              // ✅ Centralized Firebase init
 const applicationLayer = require('./ApplicationLayer');
 const calendarRoutes = require("./calendar");
 const ridesRouter = require("./routes/rides");
 
-// Conditionally initialize Firebase Admin SDK
-if (process.env.FIRESTORE_EMULATOR_HOST) {
-  // Connect to the Firestore Emulator
-  initializeApp({
-    projectId: 'dev-project', // A dummy project ID is fine for the emulator
-  });
-  console.log('Firebase Admin SDK connected to Firestore Emulator.');
-} else {
-  // Connect to production Firestore
-  const serviceAccount = require('./serviceAccountKey.json');
-  initializeApp({
-    credential: cert(serviceAccount)
-  });
-  console.log('Firebase Admin SDK connected to production Firestore.');
-}
-
-
-const db = getFirestore();
 const app = express();
 const port = 3000;
 
+// ================================
+// 🧠 Middleware
+// ================================
 app.use(bodyParser.json());
 
+// ================================
+// 🔐 Login Endpoint
+// ================================
 app.post('/login', async (req, res) => {
   const { email, password, role } = req.body;
   if (!email || !password || !role) {
@@ -43,22 +30,24 @@ app.post('/login', async (req, res) => {
   }
 });
 
-// Calendar Endpoints
-app.use('/api/calendar', calendarRoutes); // exisiting calendar routes
+// ================================
+// 📅 Calendar Endpoints
+// ================================
+app.use('/api/calendar', calendarRoutes); // Existing calendar routes
+app.use('/api/rides', ridesRouter);       // ✅ New rides calendar endpoint
 
-app.use('/api/rides', ridesRouter); // New rides calendar endpoint
-
-
-
-// Start Server
-app.listen(port, () => {
-  console.log(`Server is running on http://localhost:${port}`);
-});
-
-
+// ================================
+// 🟢 Root Endpoint
+// ================================
 app.get('/', (req, res) => {
   res.send('🚀 Server is running!');
 });
 
+// ================================
+// 🟡 Start Server
+// ================================
+app.listen(port, () => {
+  console.log(`✅ Server is running on http://localhost:${port}`);
+});
 
-module.exports = {app, db};
+module.exports = { app, db };
