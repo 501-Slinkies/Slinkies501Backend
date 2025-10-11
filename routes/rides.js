@@ -3,8 +3,8 @@
 
 const express = require("express");
 const router = express.Router();
-const admin = require("firebase-admin");
-const db = admin.firestore();
+const { db } = require("../server");  // ✅ Import the initialized db
+
 
 /**
  * GET /api/rides/calendar
