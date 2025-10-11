@@ -1,9 +1,10 @@
 const express = require('express');
 const bodyParser = require('body-parser');
-const { db } = require('./firebase');              // ✅ Centralized Firebase init
+const { db } = require('./firebase');         
 const applicationLayer = require('./ApplicationLayer');
 const calendarRoutes = require("./calendar");
 const ridesRouter = require("./routes/rides");
+const { verifyAddress, getRoute } = require("./integrations/maps");
 
 const app = express();
 const port = 3000;
@@ -28,6 +29,34 @@ app.post('/login', async (req, res) => {
   } else {
     res.status(401).send(result);
   }
+});
+
+// ================================
+// 🗺️ Maps API Endpoints (OpenStreetMap)
+// ================================
+
+/**
+ * Verify an address using OSM Nominatim API
+ * Example: /api/maps/verify?address=1600+Pennsylvania+Ave+NW+Washington+DC
+ */
+app.get("/api/maps/verify", async (req, res) => {
+  const { address } = req.query;
+  if (!address) return res.status(400).json({ success: false, message: "Missing address" });
+
+  const result = await verifyAddress(address);
+  res.json(result);
+});
+
+/**
+ * Get route between two coordinates using OSRM
+ * Format: /api/maps/route?start=-73.935242,40.730610&end=-74.0060,40.7128
+ */
+app.get("/api/maps/route", async (req, res) => {
+  const { start, end } = req.query;
+  if (!start || !end) return res.status(400).json({ success: false, message: "Missing start or end" });
+
+  const result = await getRoute(start, end);
+  res.json(result);
 });
 
 // ================================
