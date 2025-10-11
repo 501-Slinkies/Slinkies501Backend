@@ -5,6 +5,7 @@ const { db } = require('./firebase');
 const applicationLayer = require('./ApplicationLayer');
 const calendarRoutes = require("./calendar");
 const ridesRouter = require("./routes/rides");
+const clientsRouter = require("./routes/clients");   // ✅ NEW - Donations reporting route
 const { verifyAddress, getRoute } = require("./integrations/maps");
 const { sendNotification } = require("./services/notifications");
 
@@ -37,10 +38,7 @@ app.post('/login', async (req, res) => {
 // Maps API Endpoints (OpenStreetMap)
 // ================================
 
-/**
- * Verify an address using OSM Nominatim API
- * Example: /api/maps/verify?address=1600+Pennsylvania+Ave+NW+Washington+DC
- */
+// Verify an address using OSM Nominatim API Example: /api/maps/verify?address=1600+Pennsylvania+Ave+NW+Washington+DC
 app.get("/api/maps/verify", async (req, res) => {
   const { address } = req.query;
   if (!address) return res.status(400).json({ success: false, message: "Missing address" });
@@ -49,10 +47,7 @@ app.get("/api/maps/verify", async (req, res) => {
   res.json(result);
 });
 
-/**
- * Get route between two coordinates using OSRM
- * Format: /api/maps/route?start=-73.935242,40.730610&end=-74.0060,40.7128
- */
+//Get route between two coordinates using OSRM Format: /api/maps/route?start=-73.935242,40.730610&end=-74.0060,40.7128
 app.get("/api/maps/route", async (req, res) => {
   const { start, end } = req.query;
   if (!start || !end) return res.status(400).json({ success: false, message: "Missing start or end" });
@@ -62,13 +57,10 @@ app.get("/api/maps/route", async (req, res) => {
 });
 
 // ================================
-// Notification Endpoint (Twilio + SendGrid)
+// Notification Endpoint (SendGrid + Mocked SMS)
 // ================================
 
-/**
- * Send notification to a user by ID
- * Body: { "userId": "abc123", "message": "Your ride is confirmed", "type": "sms" }
- */
+// Send notification to a user by ID, Body: { "userId": "abc123", "message": "Your ride is confirmed", "type": "sms" }
 app.post("/api/notify", async (req, res) => {
   const { userId, message, type } = req.body;
 
@@ -85,10 +77,15 @@ app.post("/api/notify", async (req, res) => {
 });
 
 // ================================
-// Calendar Endpoints
+// Calendar & Rides Endpoints
 // ================================
-app.use('/api/calendar', calendarRoutes); // Existing calendar routes
-app.use('/api/rides', ridesRouter);       // New rides calendar endpoint
+app.use('/api/calendar', calendarRoutes);
+app.use('/api/rides', ridesRouter);
+
+// ================================
+// Clients / Donations Reporting
+// ================================
+app.use('/api/clients', clientsRouter);   // ✅ NEW
 
 // ================================
 // Root Endpoint
