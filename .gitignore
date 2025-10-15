@@ -2,3 +2,5 @@
 *.log
 node_modules
 serviceAccountKey.json
+.env
+docs

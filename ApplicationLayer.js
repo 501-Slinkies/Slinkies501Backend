@@ -412,6 +412,282 @@ async function matchDriversForRide(rideId) {
   }
 }
 
+// User account creation function
+async function createUserAccount(userData, creatorToken = null) {
+  try {
+    const { hashPassword, validatePasswordStrength } = require('./utils/encryption');
+
+    // Validate required fields
+    const requiredFields = ['first_name', 'last_name', 'email_address', 'password', 'primary_phone'];
+    const missingFields = requiredFields.filter(field => !userData[field]);
+    
+    if (missingFields.length > 0) {
+      return {
+        success: false,
+        message: `Missing required fields: ${missingFields.join(', ')}`
+      };
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(userData.email_address)) {
+      return {
+        success: false,
+        message: 'Invalid email address format'
+      };
+    }
+
+    // Validate password strength
+    const passwordValidation = validatePasswordStrength(userData.password);
+    if (!passwordValidation.valid) {
+      return {
+        success: false,
+        message: 'Password does not meet strength requirements',
+        errors: passwordValidation.errors
+      };
+    }
+
+    // If creator token is provided, verify it (for admin-created accounts)
+    let creatorInfo = null;
+    if (creatorToken) {
+      const tokenVerification = verifyToken(creatorToken);
+      if (!tokenVerification.success) {
+        return { success: false, message: 'Invalid creator authentication' };
+      }
+      creatorInfo = tokenVerification.user;
+    }
+
+    // Hash the password
+    const hashedPassword = await hashPassword(userData.password);
+
+    // Generate user_ID if not provided (FirstInitialLastName format)
+    const userID = userData.user_ID || `${userData.first_name.charAt(0)}${userData.last_name}`;
+
+    // Prepare user data for database
+    const userDataToStore = {
+      first_name: userData.first_name,
+      last_name: userData.last_name,
+      email_address: userData.email_address,
+      password: hashedPassword,
+      primary_phone: userData.primary_phone,
+      user_ID: userID,
+      
+      // Optional fields with defaults
+      contact_type_preference: userData.contact_type_preference || 'phone',
+      volunteering_status: userData.volunteering_status || 'Active',
+      city: userData.city || '',
+      state: userData.state || '',
+      street_address: userData.street_address || '',
+      zip: userData.zip || '',
+      month_year_of_birth: userData.month_year_of_birth || '',
+      
+      // Volunteer-specific fields with defaults
+      type_of_vehicle: userData.type_of_vehicle || '',
+      color: userData.color || '',
+      seat_height_from_ground: userData.seat_height_from_ground || 0,
+      allergens_in_car: userData.allergens_in_car || '',
+      max_rides_week: userData.max_rides_week || 0,
+      mileage_reimbursement: userData.mileage_reimbursement || false,
+      driver_availability_by_day_and_time: userData.driver_availability_by_day_and_time || '',
+      
+      // Emergency contact
+      emergency_contact_name: userData.emergency_contact_name || '',
+      emergency_contact_phone: userData.emergency_contact_phone || '',
+      relationship_to_volunteer: userData.relationship_to_volunteer || '',
+      
+      // Training dates
+      when_trained_by_lifespan: userData.when_trained_by_lifespan || '',
+      when_oriented_to_position: userData.when_oriented_to_position || '',
+      date_began_volunteering: userData.date_began_volunteering || '',
+      how_did_they_hear_about_us: userData.how_did_they_hear_about_us || '',
+      
+      // Metadata
+      created_at: new Date(),
+      updated_at: new Date(),
+      created_by: creatorInfo ? creatorInfo.userId : 'self-registration'
+    };
+
+    // Create user in database
+    const result = await dataAccess.createUser(userDataToStore);
+
+    if (result.success) {
+      return {
+        success: true,
+        message: 'User account created successfully',
+        userId: result.userId,
+        userID: userID
+      };
+    } else {
+      return {
+        success: false,
+        message: result.error || 'Failed to create user account'
+      };
+    }
+  } catch (error) {
+    console.error('Error in createUserAccount:', error);
+    return {
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    };
+  }
+}
+
+// User account update function
+async function updateUserAccount(userID, updateData, authToken = null) {
+  try {
+    const { hashPassword, validatePasswordStrength } = require('./utils/encryption');
+
+    // Verify authentication token if provided
+    let authenticatedUser = null;
+    if (authToken) {
+      const tokenVerification = verifyToken(authToken);
+      if (!tokenVerification.success) {
+        return { success: false, message: 'Invalid authentication token' };
+      }
+      authenticatedUser = tokenVerification.user;
+    }
+
+    // Get the user to update by user_ID
+    const userResult = await dataAccess.getUserByUserID(userID);
+    if (!userResult.success) {
+      return { success: false, message: 'User not found' };
+    }
+
+    const existingUser = userResult.user;
+    const userId = existingUser.id; // Firestore document ID
+
+    // Authorization check: users can only update their own profile unless they're admin
+    // For now, we'll allow updates if authenticated or if no auth is required
+    // In production, you'd want to verify the user is updating their own account
+    // or has admin privileges
+
+    // Prepare update data - only include fields that are provided
+    const updateDataToStore = {};
+
+    // Protected fields that cannot be updated
+    const protectedFields = [
+      'password', // Handle separately
+      'created_at',
+      'created_by',
+      'id'
+    ];
+
+    // Allowed fields for update
+    const allowedFields = [
+      'first_name',
+      'last_name',
+      'email_address',
+      'primary_phone',
+      'user_ID',
+      'contact_type_preference',
+      'volunteering_status',
+      'city',
+      'state',
+      'street_address',
+      'zip',
+      'month_year_of_birth',
+      'type_of_vehicle',
+      'color',
+      'seat_height_from_ground',
+      'allergens_in_car',
+      'max_rides_week',
+      'mileage_reimbursement',
+      'driver_availability_by_day_and_time',
+      'emergency_contact_name',
+      'emergency_contact_phone',
+      'relationship_to_volunteer',
+      'when_trained_by_lifespan',
+      'when_oriented_to_position',
+      'date_began_volunteering',
+      'how_did_they_hear_about_us',
+      'data1_from_date',
+      'data2_to_date',
+      'how_did_they_hear_about_us'
+    ];
+
+    // Copy allowed fields from updateData
+    for (const field of allowedFields) {
+      if (updateData[field] !== undefined) {
+        updateDataToStore[field] = updateData[field];
+      }
+    }
+
+    // Validate email format if email is being updated
+    if (updateData.email_address) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(updateData.email_address)) {
+        return {
+          success: false,
+          message: 'Invalid email address format'
+        };
+      }
+    }
+
+    // Handle password update separately (only if provided)
+    if (updateData.password) {
+      // Validate password strength
+      const passwordValidation = validatePasswordStrength(updateData.password);
+      if (!passwordValidation.valid) {
+        return {
+          success: false,
+          message: 'Password does not meet strength requirements',
+          errors: passwordValidation.errors
+        };
+      }
+
+      // Hash the new password
+      const hashedPassword = await hashPassword(updateData.password);
+      updateDataToStore.password = hashedPassword;
+    }
+
+    // Add metadata about who updated the record
+    if (authenticatedUser) {
+      updateDataToStore.updated_by = authenticatedUser.userId;
+    }
+
+    // If no fields to update, return error
+    if (Object.keys(updateDataToStore).length === 0) {
+      return {
+        success: false,
+        message: 'No valid fields provided for update'
+      };
+    }
+
+    // Update user in database
+    const result = await dataAccess.updateUser(userId, updateDataToStore);
+
+    if (result.success) {
+      // Get the updated user data (without password)
+      const updatedUserResult = await dataAccess.getUserById(userId);
+      const updatedUser = updatedUserResult.user;
+      
+      // Remove password from response
+      delete updatedUser.password;
+
+      return {
+        success: true,
+        message: 'User account updated successfully',
+        userId: userId,
+        userID: updatedUser.user_ID,
+        user: updatedUser
+      };
+    } else {
+      return {
+        success: false,
+        message: result.error || 'Failed to update user account'
+      };
+    }
+  } catch (error) {
+    console.error('Error in updateUserAccount:', error);
+    return {
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    };
+  }
+}
+
 module.exports = { 
   loginUser, 
   createRoleWithPermissions, 
@@ -422,5 +698,7 @@ module.exports = {
   isVolunteerAvailable,
   calculateRideTimeframe,
   isVolunteerAvailableForTimeframe,
-  convertFirestoreTimestamp
+  convertFirestoreTimestamp,
+  createUserAccount,
+  updateUserAccount
 };
