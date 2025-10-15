@@ -163,6 +163,51 @@ async function getRideById(rideId) {
   }
 }
 
+async function getRidesByDriverId(driverId) {
+  const db = getFirestore();
+  try {
+    // First, verify the driver exists
+    const driverDoc = await db.collection("volunteers").doc(driverId).get();
+    if (!driverDoc.exists) {
+      return { success: false, error: "Driver not found" };
+    }
+
+    // Create a reference to the driver document
+    const driverRef = db.collection("volunteers").doc(driverId);
+    
+    // Query rides where Driver field references this volunteer
+    // Try "Rides" (capital R) first
+    let ridesSnapshot = await db.collection("Rides")
+      .where("Driver", "==", driverRef)
+      .get();
+    
+    // If no results, try lowercase "rides"
+    if (ridesSnapshot.empty) {
+      ridesSnapshot = await db.collection("rides")
+        .where("Driver", "==", driverRef)
+        .get();
+    }
+    
+    const rides = [];
+    ridesSnapshot.forEach(doc => {
+      rides.push({
+        id: doc.id,
+        ...doc.data()
+      });
+    });
+    
+    return { 
+      success: true, 
+      rides: rides,
+      count: rides.length,
+      driverId: driverId
+    };
+  } catch (error) {
+    console.error("Error fetching rides by driver ID:", error);
+    return { success: false, error: error.message };
+  }
+}
+
 async function createUser(userData) {
   const db = getFirestore();
   try {
@@ -324,6 +369,32 @@ async function updateUser(userId, updateData) {
   }
 }
 
+async function deleteUser(userId) {
+  const db = getFirestore();
+  try {
+    // Check if user exists
+    const userDoc = await db.collection("volunteers").doc(userId).get();
+    if (!userDoc.exists) {
+      return { success: false, error: "User not found" };
+    }
+
+    const userData = userDoc.data();
+
+    // Delete the user document
+    await db.collection("volunteers").doc(userId).delete();
+
+    return { 
+      success: true, 
+      userId: userId,
+      userID: userData.user_ID,
+      message: "User deleted successfully"
+    };
+  } catch (error) {
+    console.error("Error deleting user:", error);
+    return { success: false, error: error.message };
+  }
+}
+
 module.exports = { 
   login, 
   createRole, 
@@ -331,9 +402,11 @@ module.exports = {
   getAllVolunteers, 
   getVolunteersByOrganization, 
   getRideById,
+  getRidesByDriverId,
   createUser,
   getUserByEmail,
   getUserById,
   getUserByUserID,
-  updateUser
+  updateUser,
+  deleteUser
 };
