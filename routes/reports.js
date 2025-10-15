@@ -42,4 +42,63 @@ router.get("/", async (req, res) => {
   }
 });
 
+
+
+                      // Helper Function \\
+
+// Get Ride Volume - Total number of rides completed within a specific time period.
+async function getRideVolume(startDate, endDate, organization) {
+  let query = db.collection("rides")
+    .where("rideDate", ">=", startDate)
+    .where("rideDate", "<=", endDate);
+
+  if (organization) query = query.where("organizationId", "==", organization);
+
+  const snapshot = await query.get();
+  return {
+    totalRides: snapshot.size,
+    rides: snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+  };
+}
+
+// Get Volunteer Hours
+async function getVolunteerHours(startDate, endDate, organization) {
+  let query = db.collection("volunteerLogs")
+    .where("date", ">=", startDate)
+    .where("date", "<=", endDate);
+
+  if (organization) query = query.where("organizationId", "==", organization);
+
+  const snapshot = await query.get();
+  let totalHours = 0;
+  snapshot.forEach(doc => {
+    totalHours += doc.data().hours || 0;
+  });
+
+  return {
+    totalHours,
+    logs: snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+  };
+}
+
+// Get Donations Total
+async function getDonationsTotal(startDate, endDate, organization) {
+  let query = db.collection("donations")
+    .where("date", ">=", startDate)
+    .where("date", "<=", endDate);
+
+  if (organization) query = query.where("organizationId", "==", organization);
+
+  const snapshot = await query.get();
+  let totalAmount = 0;
+  snapshot.forEach(doc => {
+    totalAmount += doc.data().amount || 0;
+  });
+
+  return {
+    totalAmount,
+    donations: snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+  };
+}
+
 module.exports = router;
