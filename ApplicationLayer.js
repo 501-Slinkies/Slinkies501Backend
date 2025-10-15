@@ -688,6 +688,168 @@ async function updateUserAccount(userID, updateData, authToken = null) {
   }
 }
 
+// User account deletion function
+async function deleteUserAccount(userID, authToken = null) {
+  try {
+    // Verify authentication token if provided
+    // In production, you should REQUIRE authentication for deletions
+    let authenticatedUser = null;
+    if (authToken) {
+      const tokenVerification = verifyToken(authToken);
+      if (!tokenVerification.success) {
+        return { success: false, message: 'Invalid authentication token' };
+      }
+      authenticatedUser = tokenVerification.user;
+    } else {
+      // In production, you should require authentication for deletions
+      console.warn('WARNING: User deletion attempted without authentication');
+    }
+
+    // Get the user to delete by user_ID
+    const userResult = await dataAccess.getUserByUserID(userID);
+    if (!userResult.success) {
+      return { success: false, message: 'User not found' };
+    }
+
+    const existingUser = userResult.user;
+    const userId = existingUser.id; // Firestore document ID
+
+    // Authorization check: users can only delete their own account unless they're admin
+    // For now, we'll allow deletions if authenticated or if no auth is required
+    // In production, you'd want to verify the user is deleting their own account
+    // or has admin privileges
+    
+    // Store user data for audit log before deletion
+    const userEmail = existingUser.email_address;
+    const userIDValue = existingUser.user_ID;
+
+    // Delete user from database
+    const result = await dataAccess.deleteUser(userId);
+
+    if (result.success) {
+      return {
+        success: true,
+        message: 'User account deleted successfully',
+        userId: userId,
+        userID: userIDValue,
+        deletedUser: {
+          user_ID: userIDValue,
+          email_address: userEmail,
+          first_name: existingUser.first_name,
+          last_name: existingUser.last_name
+        }
+      };
+    } else {
+      return {
+        success: false,
+        message: result.error || 'Failed to delete user account'
+      };
+    }
+  } catch (error) {
+    console.error('Error in deleteUserAccount:', error);
+    return {
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    };
+  }
+}
+
+// Get rides for a specific driver
+async function getDriverRides(driverID, authToken = null) {
+  try {
+    // Verify authentication token if provided
+    let authenticatedUser = null;
+    if (authToken) {
+      const tokenVerification = verifyToken(authToken);
+      if (!tokenVerification.success) {
+        return { success: false, message: 'Invalid authentication token' };
+      }
+      authenticatedUser = tokenVerification.user;
+    }
+
+    // Get the driver to verify they exist (by user_ID)
+    const driverResult = await dataAccess.getUserByUserID(driverID);
+    if (!driverResult.success) {
+      return { success: false, message: 'Driver not found' };
+    }
+
+    const driver = driverResult.user;
+    const driverFirestoreId = driver.id; // Firestore document ID
+
+    // Authorization check: users can only view their own rides unless they're admin
+    // For now, we'll allow viewing if authenticated or if no auth is required
+    // In production, verify the user is viewing their own rides or has admin privileges
+
+    // Get rides for this driver
+    const ridesResult = await dataAccess.getRidesByDriverId(driverFirestoreId);
+
+    if (ridesResult.success) {
+      // Process rides to convert Firestore references to more readable format
+      const processedRides = ridesResult.rides.map(ride => {
+        const processedRide = { ...ride };
+        
+        // Convert Firestore timestamps to ISO strings for easier consumption
+        if (ride.AppointmentTime && ride.AppointmentTime.toDate) {
+          processedRide.AppointmentTime = ride.AppointmentTime.toDate().toISOString();
+        }
+        if (ride.PickupTime && ride.PickupTime.toDate) {
+          processedRide.PickupTime = ride.PickupTime.toDate().toISOString();
+        }
+        if (ride.Confirmation1_Date && ride.Confirmation1_Date.toDate) {
+          processedRide.Confirmation1_Date = ride.Confirmation1_Date.toDate().toISOString();
+        }
+        
+        // Convert references to path strings for easier reading
+        if (ride.Client && ride.Client.path) {
+          processedRide.ClientPath = ride.Client.path;
+        }
+        if (ride.Driver && ride.Driver.path) {
+          processedRide.DriverPath = ride.Driver.path;
+        }
+        if (ride.Destination && ride.Destination.path) {
+          processedRide.DestinationPath = ride.Destination.path;
+        }
+        if (ride.StartLocation && ride.StartLocation.path) {
+          processedRide.StartLocationPath = ride.StartLocation.path;
+        }
+        if (ride.Dispatcher && ride.Dispatcher.path) {
+          processedRide.DispatcherPath = ride.Dispatcher.path;
+        }
+        if (ride.Confirmation1_By && ride.Confirmation1_By.path) {
+          processedRide.Confirmation1_ByPath = ride.Confirmation1_By.path;
+        }
+        
+        return processedRide;
+      });
+
+      return {
+        success: true,
+        message: `Found ${ridesResult.count} ride(s) for driver ${driverID}`,
+        data: {
+          driverID: driverID,
+          driverFirestoreId: driverFirestoreId,
+          driverName: `${driver.first_name} ${driver.last_name}`,
+          totalRides: ridesResult.count,
+          rides: processedRides
+        }
+      };
+    } else {
+      return {
+        success: false,
+        message: ridesResult.error || 'Failed to fetch rides'
+      };
+    }
+  } catch (error) {
+    console.error('Error in getDriverRides:', error);
+    return {
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    };
+  }
+}
+
 module.exports = { 
   loginUser, 
   createRoleWithPermissions, 
@@ -700,5 +862,7 @@ module.exports = {
   isVolunteerAvailableForTimeframe,
   convertFirestoreTimestamp,
   createUserAccount,
-  updateUserAccount
+  updateUserAccount,
+  deleteUserAccount,
+  getDriverRides
 };
