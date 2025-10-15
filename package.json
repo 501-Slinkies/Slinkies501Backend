@@ -5,12 +5,15 @@
     "main": "index.js",
     "dependencies": {
         "@faker-js/faker": "9.1.0",
+        "axios": "^1.6.0",
         "bcrypt": "^6.0.0",
         "body-parser": "^2.2.0",
         "csv-parser": "^3.2.0",
         "express": "^5.1.0",
+        "express-rate-limit": "^7.1.0",
         "firebase-admin": "^12.1.1",
         "fs": "^0.0.1-security",
+        "helmet": "^7.1.0",
         "jsonwebtoken": "^9.0.2"
     },
     "scripts": {
