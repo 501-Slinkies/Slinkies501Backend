@@ -163,8 +163,6 @@ async function getRideById(rideId) {
   }
 }
 
-module.exports = { login, createRole, createPermission, getAllVolunteers, getVolunteersByOrganization, getRideById };
-// Add a function below your login function
 async function fetchRidesInRange(startDate, endDate) {
   const db = getFirestore();
   const ridesRef = db.collection('rides');
@@ -183,5 +181,4 @@ async function fetchRidesInRange(startDate, endDate) {
 
   return rides;
 }
-
-module.exports = {login, fetchRidesInRange};
+module.exports = { login, createRole, createPermission, getAllVolunteers, getVolunteersByOrganization, getRideById, fetchRidesInRange };

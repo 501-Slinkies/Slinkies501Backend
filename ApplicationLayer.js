@@ -412,18 +412,6 @@ async function matchDriversForRide(rideId) {
   }
 }
 
-module.exports = { 
-  loginUser, 
-  createRoleWithPermissions, 
-  verifyToken, 
-  matchDriversForRide,
-  parseDriverAvailability,
-  parseRideDateTime,
-  isVolunteerAvailable,
-  calculateRideTimeframe,
-  isVolunteerAvailableForTimeframe,
-  convertFirestoreTimestamp
-};
 // Calendar function (startDate, endDate)
 async function getRidesByTimeframe(startDate, endDate) {
   const allRides = await dataAccess.fetchRidesInRange(startDate, endDate);
@@ -445,4 +433,16 @@ async function getRidesByTimeframe(startDate, endDate) {
   return grouped;
 }
 
-module.exports = {loginUser, getRidesByTimeframe};
+module.exports = { 
+  loginUser, 
+  createRoleWithPermissions, 
+  verifyToken, 
+  matchDriversForRide,
+  parseDriverAvailability,
+  parseRideDateTime,
+  isVolunteerAvailable,
+  calculateRideTimeframe,
+  isVolunteerAvailableForTimeframe,
+  convertFirestoreTimestamp,
+  getRidesByTimeframe
+};
