@@ -6,7 +6,7 @@
 
 const fs = require("fs");
 const csv = require("csv-parser");
-const { db } = require('./server'); // Assuming db is initialized here
+const { db } = require('./firebase');
 const { createClient, createVolunteer, createAddress, createRide } = require('./userCreation.js');
 
 // --- Utility Functions ---
@@ -62,8 +62,11 @@ function parseTripType(tripTypeStr) {
  * @returns {Promise<FirebaseFirestore.DocumentReference>} A reference to the new or existing address document.
  */
 async function createOrFindAddress(addressData) {
-    const addressesRef = db.collection('addresses');
+    // Ensure defaults are handled before querying
+    addressData.state = addressData.state || null;
+    addressData.zip = addressData.zip || null;
 
+    const addressesRef = db.collection('addresses');
     const q = addressesRef
         .where('street_address', '==', addressData.street_address)
         .where('city', '==', addressData.city)
@@ -77,13 +80,11 @@ async function createOrFindAddress(addressData) {
         console.log(`Found existing address for: ${addressData.nickname || addressData.street_address}`);
         return snapshot.docs[0].ref;
     } else {
-        // The data is already defaulted, so we can just create it.
         console.log(`Creating new address for: ${addressData.nickname || addressData.street_address}`);
         const newAddress = await createAddress(addressData);
         return db.collection('addresses').doc(newAddress.address_id);
     }
 }
-
 
 // --- Generic CSV Loader ---
 
@@ -98,13 +99,8 @@ function loadCSV(filePath) {
     });
 }
 
-
 // --- Migration Functions ---
 
-/**
- * Migrates client data from a CSV file to the 'clients' collection.
- * @param {string} filePath Path to the fakeClients.csv file.
- */
 async function migrateClients(filePath) {
     const rows = await loadCSV(filePath);
     let limit = migrateClients.limit ?? rows.length;
@@ -123,7 +119,6 @@ async function migrateClients(filePath) {
             state: row[findKey(row, "STATE")]?.trim() || null,
             zip: row[findKey(row, "ZIP")]?.trim() || row[findKey(row, "ZIP ")]?.trim() || null,
             account_status: row[findKey(row, "CLIENT STATUS")]?.trim() || 'active',
-            // ... add any other client-specific fields from your CSV here
         };
 
         try {
@@ -135,10 +130,6 @@ async function migrateClients(filePath) {
     console.log(`Client migration finished. Processed ${count} rows.`);
 }
 
-/**
- * Migrates volunteer data from a CSV file to the 'volunteers' collection.
- * @param {string} filePath Path to the fakeStaff.csv file.
- */
 async function migrateVolunteers(filePath) {
     const rows = await loadCSV(filePath);
     let limit = migrateVolunteers.limit ?? rows.length;
@@ -152,7 +143,6 @@ async function migrateVolunteers(filePath) {
             primary_phone: row[findKey(row, "PRIMARY PHONE")]?.trim() || null,
             email: row[findKey(row, "EMAIL ADDRESS")]?.trim() || null,
             position: row[findKey(row, "VOLUNTEER POSITION")] || 'driver',
-            // ... add any other volunteer-specific fields from your CSV here
         };
 
         try {
@@ -164,10 +154,6 @@ async function migrateVolunteers(filePath) {
     console.log(`Volunteer migration finished. Processed ${count} rows.`);
 }
 
-/**
- * Migrates call data from a CSV, creating 'addresses' and 'rides' documents.
- * @param {string} filePath Path to the fakeCalls.csv file.
- */
 async function migrateCallData(filePath) {
     const rows = await loadCSV(filePath);
     let limit = migrateCallData.limit ?? rows.length;
@@ -183,11 +169,14 @@ async function migrateCallData(filePath) {
 
         try {
             // Step 1: Create or find the destination Address
+            // ** FIX: Use '|| null' to prevent 'undefined' from being passed **
             const addressData = {
                 nickname: row[findKey(row, 'NAME OF DESTINATION/PRACTICE/BUILDING')] || null,
                 street_address: row[findKey(row, 'DESTINATION STREET ADDRESS')] || null,
                 address_2: row[findKey(row, 'DESTINATION ADDRESS 2')] || null,
                 city: row[findKey(row, 'CITY')] || null,
+                state: row[findKey(row, 'STATE')] || null,
+                zip: row[findKey(row, 'ZIP')] || null,
                 common_purpose: row[findKey(row, 'PURPOSE OF TRIP')] || null,
             };
 
@@ -199,8 +188,13 @@ async function migrateCallData(filePath) {
 
             // Step 2: Create the Ride document
             const clientId = row[findKey(row, 'Client ID')];
+            if (!clientId) {
+                console.warn(`Skipping ride in row ${count}: Missing Client ID.`);
+                continue;
+            }
+
             const rideData = {
-                client_ref: clientId ? db.collection('clients').doc(clientId) : null,
+                client_ref: db.collection('clients').doc(clientId),
                 end_location_address_ref: addressRef,
                 date: row[findKey(row, 'DATE OF RIDE')] || null,
                 appointment_time: row[findKey(row, 'APPOINTMENT TIME')] || null,
@@ -240,3 +234,4 @@ async function migrateCallData(filePath) {
 
     console.log("\nAll migrations complete.");
 })();
+
