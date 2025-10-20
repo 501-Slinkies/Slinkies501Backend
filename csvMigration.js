@@ -1,86 +1,93 @@
+/**
+ * @fileoverview Script to migrate legacy CSV data into Firestore.
+ * This script reads CSV files for clients, volunteers (staff), and calls,
+ * then uses standalone creation functions to populate the corresponding Firestore collections.
+ */
+
 const fs = require("fs");
 const csv = require("csv-parser");
+const { db } = require('./firebase');
+const { createClient, createVolunteer, createAddress, createRide } = require('./userCreation.js');
 
-let createBaseUser, makeUserClient, makeUserVolunteer;
-const users = require("./users.js");
-createBaseUser = users.createBaseUser;
-makeUserClient = users.makeUserClient;
-makeUserVolunteer = users.makeUserVolunteer;
+// --- Utility Functions ---
 
-// Utility: Find a key in a row, ignoring case and whitespace
+/**
+ * Finds a key in a CSV row object, ignoring case and leading/trailing whitespace.
+ * @param {object} row The row object from the CSV parser.
+ * @param {string} target The target key name to find (e.g., "FIRST NAME").
+ * @returns {string|undefined} The matching key from the row object.
+ */
 function findKey(row, target) {
     return Object.keys(row).find(k => k.trim().toUpperCase() === target.toUpperCase());
 }
 
-// Utility: Normalize account status and temp date for volunteers
-function normalizeVolunteerStatus(status) {
-    if (!status) return { accountStatus: null, tempDate: null };
-    if (status.startsWith("Away from")) {
-        // Example: "Away from 11/11/2025 until 04/02/2026"
-        const match = status.match(/Away from (.+?) until (.+)/);
-        return match
-            ? { accountStatus: "Away", tempDate: match[2] }
-            : { accountStatus: status, tempDate: null };
+/**
+ * Parses a string representing a duration (e.g., "30 min", "1 hr") into an integer of minutes.
+ * @param {string} durationStr The string to parse.
+ * @returns {number|null} The duration in minutes, or null if parsing fails.
+ */
+function parseDuration(durationStr) {
+    if (!durationStr) return null;
+    let totalMinutes = 0;
+    const hourMatch = durationStr.match(/(\d+)\s*hr/);
+    const minMatch = durationStr.match(/(\d+)\s*min/);
+    if (hourMatch) totalMinutes += parseInt(hourMatch[1], 10) * 60;
+    if (minMatch) totalMinutes += parseInt(minMatch[1], 10);
+    return totalMinutes > 0 ? totalMinutes : null;
+}
+
+/**
+ * Converts a 'Y'/'N' string to a boolean.
+ * @param {string} wheelchairStr The string indicating wheelchair need ('Y' or 'N').
+ * @returns {boolean} True if the input is 'Y' (case-insensitive), otherwise false.
+ */
+function parseWheelchair(wheelchairStr) {
+    return wheelchairStr ? wheelchairStr.trim().toUpperCase() === 'Y' : false;
+}
+
+/**
+ * Normalizes the trip type string from the CSV.
+ * @param {string} tripTypeStr The raw trip type string.
+ * @returns {string} The normalized trip type ("RoundTrip" or "OneWay").
+ */
+function parseTripType(tripTypeStr) {
+    if (!tripTypeStr) return "OneWay";
+    const normalized = tripTypeStr.toLowerCase().replace(/\s+/g, '');
+    return normalized === 'roundtrip' ? 'RoundTrip' : 'OneWay';
+}
+
+/**
+ * Checks for an existing address to avoid duplicates, or creates a new one.
+ * @param {object} addressData The address data extracted from a CSV row.
+ * @returns {Promise<FirebaseFirestore.DocumentReference>} A reference to the new or existing address document.
+ */
+async function createOrFindAddress(addressData) {
+    // Ensure defaults are handled before querying
+    addressData.state = addressData.state || null;
+    addressData.zip = addressData.zip || null;
+
+    const addressesRef = db.collection('addresses');
+    const q = addressesRef
+        .where('street_address', '==', addressData.street_address)
+        .where('city', '==', addressData.city)
+        .where('state', '==', addressData.state)
+        .where('zip', '==', addressData.zip)
+        .where('nickname', '==', addressData.nickname);
+
+    const snapshot = await q.get();
+
+    if (!snapshot.empty) {
+        console.log(`Found existing address for: ${addressData.nickname || addressData.street_address}`);
+        return snapshot.docs[0].ref;
+    } else {
+        console.log(`Creating new address for: ${addressData.nickname || addressData.street_address}`);
+        const newAddress = await createAddress(addressData);
+        return db.collection('addresses').doc(newAddress.address_id);
     }
-    return { accountStatus: status, tempDate: null };
 }
 
-// Extract base user fields from a client row
-function extractBaseUserFromClient(row) {
-    return {
-        firstName: row[findKey(row, "FIRST NAME")]?.trim() || null,
-        lastName: row[findKey(row, "LAST NAME")]?.trim() || null,
-        streetAddress: row[findKey(row, "STREET ADDRESS")]?.trim() || null,
-        address2: row[findKey(row, "ADDRESS 2")]?.trim() || null,
-        zip: row[findKey(row, "ZIP")]?.trim() || row[findKey(row, "ZIP ")]?.trim() || null,
-        city: row[findKey(row, "CITY")]?.trim() || null,
-        state: row[findKey(row, "STATE")]?.trim() || null,
-        email: row[findKey(row, "EMAIL ADDRESS")]?.trim() || null,
-        primaryPhone: row[findKey(row, "PRIMARY PHONE")]?.trim() || null,
-        primaryIsCell: row[findKey(row, "Primary isCell")] === "Y",
-        primaryAllowText: row[findKey(row, "Primary allowText")] === "Y",
-        secondaryPhone: row[findKey(row, "SECONDARY PHONE")]?.trim() || null,
-        secondaryIsCell: row[findKey(row, "Secondary isCell")] === "Y",
-        secondaryAllowText: row[findKey(row, "Secondary allowText")] === "Y",
-        emergencyContactName: row[findKey(row, "EMERGENCY CONTACT NAME")]?.trim() || null,
-        emergencyContactPhone: row[findKey(row, "EMERGENCY CONTACT PHONE")]?.trim() || null,
-        emergencyContactRelationship: row[findKey(row, "RELATIONSHIP TO CLIENT")]?.trim() || null,
-        accountStatus: row[findKey(row, "CLIENT STATUS")]?.trim() || null,
-        tempDate: row[findKey(row, "temp date")]?.trim() || null,
-        monthYearOfBirth: row[findKey(row, "MONTH & YEAR OF BIRTH")]?.trim() || null,
-        comments: row[findKey(row, "COMMENTS")]?.trim() || null,
-    };
-}
+// --- Generic CSV Loader ---
 
-// Extract base user fields from a volunteer row
-function extractBaseUserFromVolunteer(row) {
-    const statusObj = normalizeVolunteerStatus(row[findKey(row, "VOLUNTEERING STATUS")]);
-    return {
-        firstName: row[findKey(row, "FIRST NAME")]?.trim() || null,
-        lastName: row[findKey(row, "LAST NAME")]?.trim() || null,
-        streetAddress: row[findKey(row, "STREET ADDRESS")]?.trim() || null,
-        address2: row[findKey(row, "ADDRESS 2")]?.trim() || null,
-        zip: row[findKey(row, "ZIP")]?.trim() || null,
-        city: row[findKey(row, "CITY")]?.trim() || null,
-        state: row[findKey(row, "STATE")]?.trim() || null,
-        email: row[findKey(row, "EMAIL ADDRESS")]?.trim() || null,
-        primaryPhone: row[findKey(row, "PRIMARY PHONE")]?.trim() || null,
-        primaryIsCell: row[findKey(row, "primary isCell")] === "Y",
-        primaryAllowText: row[findKey(row, "primary can text")] === "Y",
-        secondaryPhone: row[findKey(row, "SECONDARY PHONE")]?.trim() || null,
-        secondaryIsCell: row[findKey(row, "secondary isCell")] === "Y",
-        secondaryAllowText: row[findKey(row, "secondary canText")] === "Y",
-        emergencyContactName: row[findKey(row, "EMERGENCY CONTACT NAME")]?.trim() || null,
-        emergencyContactPhone: row[findKey(row, "EMERGENCY CONTACT PHONE")]?.trim() || null,
-        emergencyContactRelationship: row[findKey(row, "RELATIONSHIP TO VOLUNTEER")]?.trim() || null,
-        accountStatus: statusObj.accountStatus,
-        tempDate: statusObj.tempDate,
-        monthYearOfBirth: row[findKey(row, "MONTH & YEAR OF BIRTH")]?.trim() || null,
-        comments: row[findKey(row, "COMMENTS")]?.trim() || null,
-    };
-}
-
-// Generic CSV reader
 function loadCSV(filePath) {
     return new Promise((resolve, reject) => {
         const rows = [];
@@ -92,127 +99,139 @@ function loadCSV(filePath) {
     });
 }
 
+// --- Migration Functions ---
 
-// Process clients
 async function migrateClients(filePath) {
     const rows = await loadCSV(filePath);
-    // Accept an optional limit argument
     let limit = migrateClients.limit ?? rows.length;
     let count = 0;
     for (const row of rows) {
         if (count++ >= limit) break;
-        // Step 1: extract and create base user
-        const baseUser = extractBaseUserFromClient(row);
-        const { uid } = await createBaseUser(baseUser);
 
-        // Step 2: promote to client with client-specific fields
-        await makeUserClient(uid, {
-            typeOfResidence: row[findKey(row, "TYPE OF RESIDENCE")],
-            mobilityAssistance: row[findKey(row, "MOBILITY ASSISTANCE")],
-            otherLimitations: row[findKey(row, "OTHER LIMITATIONS")],
-            carHeightNeeded: row[findKey(row, "CAR HEIGHT NEEDED")],
-            serviceAnimal: row[findKey(row, "SERVICE ANIMAL")],
-            breed: row[findKey(row, "BREED")],
-            size: row[findKey(row, "SIZE")],
-            oxygen: row[findKey(row, "OXYGEN")],
-            allergies: row[findKey(row, "ALLERGIES")],
-            pickupInstructions: row[findKey(row, "PICK UP INSTRUCTIONS")],
-            dateEnrolled: row[findKey(row, "Date Enrolled")],
-            liveAlone: row[findKey(row, "LIVE ALONE")],
-            gender: row[findKey(row, "M/F")],
-            howDidTheyHear: row[findKey(row, "HOW DID THEY HEAR ABOUT US?")],
-            data1: row[findKey(row, "Data1_ClientName")],
-            data2: row[findKey(row, "Data2")],
-            data3: row[findKey(row, "Data3")],
-        });
+        const clientData = {
+            first_name: row[findKey(row, "FIRST NAME")]?.trim() || null,
+            last_name: row[findKey(row, "LAST NAME")]?.trim() || null,
+            primary_phone: row[findKey(row, "PRIMARY PHONE")]?.trim() || null,
+            email: row[findKey(row, "EMAIL ADDRESS")]?.trim() || null,
+            street_address: row[findKey(row, "STREET ADDRESS")]?.trim() || null,
+            address_2: row[findKey(row, "ADDRESS 2")]?.trim() || null,
+            city: row[findKey(row, "CITY")]?.trim() || null,
+            state: row[findKey(row, "STATE")]?.trim() || null,
+            zip: row[findKey(row, "ZIP")]?.trim() || row[findKey(row, "ZIP ")]?.trim() || null,
+            account_status: row[findKey(row, "CLIENT STATUS")]?.trim() || 'active',
+        };
+
+        try {
+            await createClient(clientData);
+        } catch (error) {
+            console.error(`Failed to migrate client row ${count}: ${error.message}`, clientData);
+        }
     }
+    console.log(`Client migration finished. Processed ${count} rows.`);
 }
 
-// Process volunteers
 async function migrateVolunteers(filePath) {
     const rows = await loadCSV(filePath);
-    // Accept an optional limit argument
     let limit = migrateVolunteers.limit ?? rows.length;
     let count = 0;
     for (const row of rows) {
         if (count++ >= limit) break;
-        // Step 1: extract and create base user
-        const baseUser = extractBaseUserFromVolunteer(row);
-        const { uid } = await createBaseUser(baseUser)
 
-        // Step 2: promote to volunteer with volunteer-specific fields
-        await makeUserVolunteer(uid, {
-            volunteerPosition: row[findKey(row, "VOLUNTEER POSITION")],
-            userId: row[findKey(row, "User ID")],
-            password: row[findKey(row, "PASSWORD")],
-            contactTypePreference: row[findKey(row, "CONTACT TYPE PREFERENCE")],
-            driverAvailabilityByDayAndTime: row[findKey(row, "DRIVER AVAILABILITY BY DAY & TIME")],
-            typeOfVehicle: row[findKey(row, "TYPE OF VEHICLE")],
-            allergensInCar: row[findKey(row, "Allergens in Car")],
-            color: row[findKey(row, "COLOR")],
-            seatHeightFromGround: row[findKey(row, "SEAT HEIGHT FROM GROUND")],
-            maxRidesPerWeek: row[findKey(row, "MAX RIDES/WEEK")],
-            townPreferenceForClientResidence: row[findKey(row, "TOWN PREFERENCE FOR CLIENT RESIDENCE")],
-            destinationLimitations: row[findKey(row, "DESTINATION LIMITATIONS")],
-            clientPreferenceForDrivers: row[findKey(row, "CLIENT PREFERENCE FOR DRIVERS")],
-            mileageReimbursement: row[findKey(row, "MILEAGE REIMBURSEMENT")],
-            howDidTheyHear: row[findKey(row, "HOW DID THEY HEAR ABOUT US?")],
-            whenTrainedByLifespan: row[findKey(row, "WHEN TRAINED BY LIFESPAN")],
-            whenOrientedToPosition: row[findKey(row, "WHEN ORIENTED TO POSITION")],
-            dateBeganVolunteering: row[findKey(row, "DATE BEGAN VOLUNTEERING")],
-            data1: row[findKey(row, "Data1_fromDate")],
-            data2: row[findKey(row, "Data2_toDate")],
-            data3: row[findKey(row, "Data3")],
-        });
-    }
-}
-
-// Run migrations
-(async() => {
-    // Specify how many users to migrate at once by setting the 'limit' property
-    migrateClients.limit = 1; // Change this number to migrate more clients at once or comment out to process all
-    migrateVolunteers.limit = 1; // Change this number to migrate more volunteers at once or comment out to process all
-    await migrateClients("./fakeClients.csv");
-    await migrateVolunteers("./fakeStaff.csv");
-})();
-
-
-async function migrateClientsPreview(filePath, limit = 5) {
-    console.log("calling migrateClientsPreview");
-    const rows = await loadCSV(filePath);
-
-    for (const [i, row] of rows.entries()) {
-        if (i >= limit) break; // only process first N rows
-
-        // Use the same extraction logic as migrateClients
-        const baseUser = extractBaseUserFromClient(row);
-        const clientProfile = {
-            typeOfResidence: row[findKey(row, "TYPE OF RESIDENCE")],
-            mobilityAssistance: row[findKey(row, "MOBILITY ASSISTANCE")],
-            otherLimitations: row[findKey(row, "OTHER LIMITATIONS")],
-            carHeightNeeded: row[findKey(row, "CAR HEIGHT NEEDED")],
-            serviceAnimal: row[findKey(row, "SERVICE ANIMAL")],
-            breed: row[findKey(row, "BREED")],
-            size: row[findKey(row, "SIZE")],
-            oxygen: row[findKey(row, "OXYGEN")],
-            allergies: row[findKey(row, "ALLERGIES")],
-            pickupInstructions: row[findKey(row, "PICK UP INSTRUCTIONS")],
-            dateEnrolled: row[findKey(row, "Date Enrolled")],
-            liveAlone: row[findKey(row, "LIVE ALONE")],
-            gender: row[findKey(row, "M/F")],
-            howDidTheyHear: row[findKey(row, "HOW DID THEY HEAR ABOUT US?")],
-            data1: row[findKey(row, "Data1_ClientName")],
-            data2: row[findKey(row, "Data2")],
-            data3: row[findKey(row, "Data3")],
+        const volunteerData = {
+            first_name: row[findKey(row, "FIRST NAME")]?.trim() || null,
+            last_name: row[findKey(row, "LAST NAME")]?.trim() || null,
+            primary_phone: row[findKey(row, "PRIMARY PHONE")]?.trim() || null,
+            email: row[findKey(row, "EMAIL ADDRESS")]?.trim() || null,
+            position: row[findKey(row, "VOLUNTEER POSITION")] || 'driver',
         };
 
-        // Log the preview as migrateClients would process
-        console.log("Base User:", baseUser);
-        console.log("Client Profile:", clientProfile);
-        console.log("------");
+        try {
+            await createVolunteer(volunteerData);
+        } catch (error) {
+            console.error(`Failed to migrate volunteer row ${count}: ${error.message}`, volunteerData);
+        }
     }
+    console.log(`Volunteer migration finished. Processed ${count} rows.`);
 }
 
-// migrateClientsPreview("./fakeClients.csv", 1)
-//   .then(() => console.log("Preview finished"))
-//   .catch((err) => console.error("Preview failed:", err));
+async function migrateCallData(filePath) {
+    const rows = await loadCSV(filePath);
+    let limit = migrateCallData.limit ?? rows.length;
+    let count = 0;
+    for (const row of rows) {
+        if (count++ >= limit) break;
+
+        const isRideRequest = row[findKey(row, 'isRideRequest')]?.toUpperCase() === 'TRUE';
+        if (!isRideRequest) {
+            console.log(`Skipping row ${count} as it's not a ride request.`);
+            continue;
+        }
+
+        try {
+            // Step 1: Create or find the destination Address
+            // ** FIX: Use '|| null' to prevent 'undefined' from being passed **
+            const addressData = {
+                nickname: row[findKey(row, 'NAME OF DESTINATION/PRACTICE/BUILDING')] || null,
+                street_address: row[findKey(row, 'DESTINATION STREET ADDRESS')] || null,
+                address_2: row[findKey(row, 'DESTINATION ADDRESS 2')] || null,
+                city: row[findKey(row, 'CITY')] || null,
+                state: row[findKey(row, 'STATE')] || null,
+                zip: row[findKey(row, 'ZIP')] || null,
+                common_purpose: row[findKey(row, 'PURPOSE OF TRIP')] || null,
+            };
+
+            if (!addressData.street_address || !addressData.city) {
+                console.warn(`Skipping ride in row ${count}: Missing essential address details.`);
+                continue;
+            }
+            const addressRef = await createOrFindAddress(addressData);
+
+            // Step 2: Create the Ride document
+            const clientId = row[findKey(row, 'Client ID')];
+            if (!clientId) {
+                console.warn(`Skipping ride in row ${count}: Missing Client ID.`);
+                continue;
+            }
+
+            const rideData = {
+                client_ref: db.collection('clients').doc(clientId),
+                end_location_address_ref: addressRef,
+                date: row[findKey(row, 'DATE OF RIDE')] || null,
+                appointment_time: row[findKey(row, 'APPOINTMENT TIME')] || null,
+                pickup_time: row[findKey(row, 'PICK UP TIME')] || null,
+                estimated_duration: parseDuration(row[findKey(row, 'ESTIMATED LENGTH OF APPOINTMENT')]),
+                purpose: row[findKey(row, 'PURPOSE OF TRIP')] || null,
+                trip_type: parseTripType(row[findKey(row, 'ROUND TRIP OR ONE WAY')]),
+                wheelchair: parseWheelchair(row[findKey(row, 'WHEELCHAIR')]),
+                external_comments: row[findKey(row, 'COMMENTS ABOUT RIDE')] || null,
+            };
+
+            await createRide(rideData);
+
+        } catch (error) {
+            console.error(`Failed to migrate call data row ${count}: ${error.message}`, row);
+        }
+    }
+    console.log(`Call data migration finished. Processed ${count} rows.`);
+}
+
+// --- Main Execution ---
+
+(async () => {
+    // Set optional limits for testing, or comment out to process all rows.
+    migrateClients.limit = 5;
+    migrateVolunteers.limit = 5;
+    migrateCallData.limit = 5;
+
+    console.log("Starting client migration...");
+    await migrateClients("./fakeClients.csv");
+
+    console.log("\nStarting volunteer migration...");
+    await migrateVolunteers("./fakeStaff.csv");
+
+    console.log("\nStarting call data migration...");
+    await migrateCallData("./fakeCalls.csv");
+
+    console.log("\nAll migrations complete.");
+})();
+
