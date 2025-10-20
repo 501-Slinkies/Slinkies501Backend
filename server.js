@@ -115,6 +115,367 @@ app.post('/roles', async (req, res) => {
   }
 });
 
+// User account creation endpoint
+app.post('/api/users', async (req, res) => {
+  try {
+    const auditLogger = require('./AuditLogger');
+    const { getClientIp, getUserAgent } = require('./middleware/securityMiddleware');
+    
+    // Extract authentication token if provided (optional - for admin user creation)
+    let authToken = null;
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      authToken = authHeader.substring(7);
+    }
+
+    // Extract user data from request body
+    const userData = req.body;
+
+    // Create the user account
+    const result = await applicationLayer.createUserAccount(userData, authToken);
+
+    // Log the account creation attempt
+    const ipAddress = getClientIp ? getClientIp(req) : req.ip;
+    const userAgent = getUserAgent ? getUserAgent(req) : req.get('user-agent');
+    
+    if (result.success) {
+      // Log successful account creation
+      await auditLogger.logPHIModification(
+        result.userId,
+        userData.email_address,
+        'new_user',
+        'N/A',
+        'CREATE',
+        'user',
+        result.userId,
+        ipAddress,
+        userAgent,
+        { 
+          user_ID: result.userID,
+          created_by: authToken ? 'admin' : 'self-registration'
+        }
+      );
+
+      res.status(201).send({
+        success: true,
+        message: result.message,
+        data: {
+          userId: result.userId,
+          userID: result.userID
+        }
+      });
+    } else {
+      // Log failed account creation attempt
+      await auditLogger.logAccess({
+        userId: 'unknown',
+        userEmail: userData.email_address || 'unknown',
+        userRole: 'unknown',
+        organizationId: 'N/A',
+        action: 'CREATE',
+        resourceType: 'user',
+        resourceId: 'N/A',
+        ipAddress: ipAddress,
+        userAgent: userAgent,
+        success: false,
+        failureReason: result.message
+      });
+
+      // Determine appropriate status code
+      let statusCode = 400;
+      if (result.message && result.message.includes('already exists')) {
+        statusCode = 409; // Conflict
+      } else if (result.message && result.message.includes('authentication')) {
+        statusCode = 401; // Unauthorized
+      }
+
+      res.status(statusCode).send({
+        success: false,
+        message: result.message,
+        errors: result.errors
+      });
+    }
+  } catch (error) {
+    console.error('Error in /api/users endpoint:', error);
+    res.status(500).send({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+});
+
+// User account update endpoint
+app.put('/api/users/:userID', async (req, res) => {
+  try {
+    const auditLogger = require('./AuditLogger');
+    const { getClientIp, getUserAgent } = require('./middleware/securityMiddleware');
+    
+    // Extract the userID from URL parameters
+    const { userID } = req.params;
+    
+    // Extract authentication token if provided (optional for now, required in production)
+    let authToken = null;
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      authToken = authHeader.substring(7);
+    }
+
+    // Extract update data from request body
+    const updateData = req.body;
+
+    // Update the user account
+    const result = await applicationLayer.updateUserAccount(userID, updateData, authToken);
+
+    // Log the update attempt
+    const ipAddress = getClientIp ? getClientIp(req) : req.ip;
+    const userAgent = getUserAgent ? getUserAgent(req) : req.get('user-agent');
+    
+    if (result.success) {
+      // Log successful account update
+      await auditLogger.logPHIModification(
+        result.userId,
+        result.user.email_address,
+        'user',
+        'N/A',
+        'UPDATE',
+        'user',
+        result.userId,
+        ipAddress,
+        userAgent,
+        { 
+          user_ID: result.userID,
+          updated_by: authToken ? 'admin' : 'self-update',
+          fields_updated: Object.keys(updateData)
+        }
+      );
+
+      res.status(200).send({
+        success: true,
+        message: result.message,
+        data: {
+          userId: result.userId,
+          userID: result.userID,
+          user: result.user
+        }
+      });
+    } else {
+      // Log failed update attempt
+      await auditLogger.logAccess({
+        userId: 'unknown',
+        userEmail: updateData.email_address || 'unknown',
+        userRole: 'unknown',
+        organizationId: 'N/A',
+        action: 'UPDATE',
+        resourceType: 'user',
+        resourceId: userID,
+        ipAddress: ipAddress,
+        userAgent: userAgent,
+        success: false,
+        failureReason: result.message
+      });
+
+      // Determine appropriate status code
+      let statusCode = 400;
+      if (result.message && result.message.includes('not found')) {
+        statusCode = 404; // Not Found
+      } else if (result.message && result.message.includes('authentication')) {
+        statusCode = 401; // Unauthorized
+      } else if (result.message && result.message.includes('already in use')) {
+        statusCode = 409; // Conflict
+      }
+
+      res.status(statusCode).send({
+        success: false,
+        message: result.message,
+        errors: result.errors
+      });
+    }
+  } catch (error) {
+    console.error('Error in /api/users/:userID endpoint:', error);
+    res.status(500).send({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+});
+
+// User account deletion endpoint
+app.delete('/api/users/:userID', async (req, res) => {
+  try {
+    const auditLogger = require('./AuditLogger');
+    const { getClientIp, getUserAgent } = require('./middleware/securityMiddleware');
+    
+    // Extract the userID from URL parameters
+    const { userID } = req.params;
+    
+    // Extract authentication token if provided (should be REQUIRED in production)
+    let authToken = null;
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      authToken = authHeader.substring(7);
+    }
+
+    // Delete the user account
+    const result = await applicationLayer.deleteUserAccount(userID, authToken);
+
+    // Log the deletion attempt
+    const ipAddress = getClientIp ? getClientIp(req) : req.ip;
+    const userAgent = getUserAgent ? getUserAgent(req) : req.get('user-agent');
+    
+    if (result.success) {
+      // Log successful account deletion
+      await auditLogger.logPHIModification(
+        result.userId,
+        result.deletedUser.email_address,
+        'user',
+        'N/A',
+        'DELETE',
+        'user',
+        result.userId,
+        ipAddress,
+        userAgent,
+        { 
+          user_ID: result.userID,
+          deleted_by: authToken ? 'admin' : 'self-delete',
+          deleted_user: {
+            user_ID: result.deletedUser.user_ID,
+            first_name: result.deletedUser.first_name,
+            last_name: result.deletedUser.last_name,
+            email_address: result.deletedUser.email_address
+          }
+        }
+      );
+
+      res.status(200).send({
+        success: true,
+        message: result.message,
+        data: {
+          userId: result.userId,
+          userID: result.userID,
+          deletedUser: result.deletedUser
+        }
+      });
+    } else {
+      // Log failed deletion attempt
+      await auditLogger.logAccess({
+        userId: 'unknown',
+        userEmail: 'unknown',
+        userRole: 'unknown',
+        organizationId: 'N/A',
+        action: 'DELETE',
+        resourceType: 'user',
+        resourceId: userID,
+        ipAddress: ipAddress,
+        userAgent: userAgent,
+        success: false,
+        failureReason: result.message
+      });
+
+      // Determine appropriate status code
+      let statusCode = 400;
+      if (result.message && result.message.includes('not found')) {
+        statusCode = 404; // Not Found
+      } else if (result.message && result.message.includes('authentication')) {
+        statusCode = 401; // Unauthorized
+      }
+
+      res.status(statusCode).send({
+        success: false,
+        message: result.message,
+        errors: result.errors
+      });
+    }
+  } catch (error) {
+    console.error('Error in DELETE /api/users/:userID endpoint:', error);
+    res.status(500).send({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+});
+
+// Get all rides for a specific driver
+app.get('/api/drivers/:driverID/rides', async (req, res) => {
+  try {
+    const auditLogger = require('./AuditLogger');
+    const { getClientIp, getUserAgent } = require('./middleware/securityMiddleware');
+    
+    // Extract the driverID from URL parameters
+    const { driverID } = req.params;
+    
+    // Extract authentication token if provided (optional)
+    let authToken = null;
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      authToken = authHeader.substring(7);
+    }
+
+    // Get rides for the driver
+    const result = await applicationLayer.getDriverRides(driverID, authToken);
+
+    // Log the access attempt
+    const ipAddress = getClientIp ? getClientIp(req) : req.ip;
+    const userAgent = getUserAgent ? getUserAgent(req) : req.get('user-agent');
+    
+    if (result.success) {
+      // Log successful ride data access
+      await auditLogger.logPHIAccess(
+        result.data.driverFirestoreId,
+        'unknown', // email not needed for this log
+        'driver',
+        'N/A',
+        'rides',
+        driverID,
+        ipAddress,
+        userAgent
+      );
+
+      res.status(200).send({
+        success: true,
+        message: result.message,
+        data: result.data
+      });
+    } else {
+      // Log failed access attempt
+      await auditLogger.logAccess({
+        userId: 'unknown',
+        userEmail: 'unknown',
+        userRole: 'unknown',
+        organizationId: 'N/A',
+        action: 'READ',
+        resourceType: 'rides',
+        resourceId: driverID,
+        ipAddress: ipAddress,
+        userAgent: userAgent,
+        success: false,
+        failureReason: result.message
+      });
+
+      // Determine appropriate status code
+      let statusCode = 400;
+      if (result.message && result.message.includes('not found')) {
+        statusCode = 404; // Not Found
+      } else if (result.message && result.message.includes('authentication')) {
+        statusCode = 401; // Unauthorized
+      }
+
+      res.status(statusCode).send({
+        success: false,
+        message: result.message
+      });
+    }
+  } catch (error) {
+    console.error('Error in GET /api/drivers/:driverID/rides endpoint:', error);
+    res.status(500).send({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+});
+
 // Endpoint to match drivers for a specific ride
 // This endpoint takes a ride document ID and returns available/unavailable drivers
 // based on their availability and the ride's timeframe (PickupTime, AppointmentTime, EstimatedDuration, TripType)

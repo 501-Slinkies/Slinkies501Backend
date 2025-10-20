@@ -163,6 +163,239 @@ async function getRideById(rideId) {
   }
 }
 
+async function getRidesByDriverId(driverId) {
+  const db = getFirestore();
+  try {
+    // First, verify the driver exists
+    const driverDoc = await db.collection("volunteers").doc(driverId).get();
+    if (!driverDoc.exists) {
+      return { success: false, error: "Driver not found" };
+    }
+
+    // Create a reference to the driver document
+    const driverRef = db.collection("volunteers").doc(driverId);
+    
+    // Query rides where Driver field references this volunteer
+    // Try "Rides" (capital R) first
+    let ridesSnapshot = await db.collection("Rides")
+      .where("Driver", "==", driverRef)
+      .get();
+    
+    // If no results, try lowercase "rides"
+    if (ridesSnapshot.empty) {
+      ridesSnapshot = await db.collection("rides")
+        .where("Driver", "==", driverRef)
+        .get();
+    }
+    
+    const rides = [];
+    ridesSnapshot.forEach(doc => {
+      rides.push({
+        id: doc.id,
+        ...doc.data()
+      });
+    });
+    
+    return { 
+      success: true, 
+      rides: rides,
+      count: rides.length,
+      driverId: driverId
+    };
+  } catch (error) {
+    console.error("Error fetching rides by driver ID:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+async function createUser(userData) {
+  const db = getFirestore();
+  try {
+    // Check if user with same email already exists
+    if (userData.email_address) {
+      const existingUserQuery = await db.collection("volunteers")
+        .where("email_address", "==", userData.email_address)
+        .get();
+      
+      if (!existingUserQuery.empty) {
+        return { success: false, error: "User with this email already exists" };
+      }
+    }
+
+    // Check if user_ID already exists
+    if (userData.user_ID) {
+      const existingUserIdQuery = await db.collection("volunteers")
+        .where("user_ID", "==", userData.user_ID)
+        .get();
+      
+      if (!existingUserIdQuery.empty) {
+        return { success: false, error: "User ID already exists" };
+      }
+    }
+
+    // Create the user document
+    const userRef = db.collection("volunteers").doc();
+    await userRef.set(userData);
+
+    return { 
+      success: true, 
+      userId: userRef.id,
+      message: "User created successfully"
+    };
+  } catch (error) {
+    console.error("Error creating user:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+async function getUserByEmail(email) {
+  const db = getFirestore();
+  try {
+    const snapshot = await db.collection("volunteers")
+      .where("email_address", "==", email)
+      .get();
+    
+    if (snapshot.empty) {
+      return { success: false, error: "User not found" };
+    }
+
+    const doc = snapshot.docs[0];
+    return { 
+      success: true, 
+      user: { id: doc.id, ...doc.data() }
+    };
+  } catch (error) {
+    console.error("Error fetching user:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+async function getUserById(userId) {
+  const db = getFirestore();
+  try {
+    const doc = await db.collection("volunteers").doc(userId).get();
+    
+    if (!doc.exists) {
+      return { success: false, error: "User not found" };
+    }
+
+    return { 
+      success: true, 
+      user: { id: doc.id, ...doc.data() }
+    };
+  } catch (error) {
+    console.error("Error fetching user by ID:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+async function getUserByUserID(userID) {
+  const db = getFirestore();
+  try {
+    const snapshot = await db.collection("volunteers")
+      .where("user_ID", "==", userID)
+      .get();
+    
+    if (snapshot.empty) {
+      return { success: false, error: "User not found" };
+    }
+
+    const doc = snapshot.docs[0];
+    return { 
+      success: true, 
+      user: { id: doc.id, ...doc.data() }
+    };
+  } catch (error) {
+    console.error("Error fetching user by user_ID:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+async function updateUser(userId, updateData) {
+  const db = getFirestore();
+  try {
+    // Check if user exists
+    const userDoc = await db.collection("volunteers").doc(userId).get();
+    if (!userDoc.exists) {
+      return { success: false, error: "User not found" };
+    }
+
+    const currentData = userDoc.data();
+
+    // If email is being changed, check it's not already taken by another user
+    if (updateData.email_address && updateData.email_address !== currentData.email_address) {
+      const existingUserQuery = await db.collection("volunteers")
+        .where("email_address", "==", updateData.email_address)
+        .get();
+      
+      if (!existingUserQuery.empty) {
+        // Make sure it's not the same user
+        const existingDoc = existingUserQuery.docs[0];
+        if (existingDoc.id !== userId) {
+          return { success: false, error: "Email address already in use by another user" };
+        }
+      }
+    }
+
+    // If user_ID is being changed, check it's not already taken
+    if (updateData.user_ID && updateData.user_ID !== currentData.user_ID) {
+      const existingUserIdQuery = await db.collection("volunteers")
+        .where("user_ID", "==", updateData.user_ID)
+        .get();
+      
+      if (!existingUserIdQuery.empty) {
+        // Make sure it's not the same user
+        const existingDoc = existingUserIdQuery.docs[0];
+        if (existingDoc.id !== userId) {
+          return { success: false, error: "User ID already in use by another user" };
+        }
+      }
+    }
+
+    // Always update the updated_at timestamp
+    updateData.updated_at = new Date();
+
+    // Update the user document
+    await db.collection("volunteers").doc(userId).update(updateData);
+
+    return { 
+      success: true, 
+      userId: userId,
+      message: "User updated successfully"
+    };
+  } catch (error) {
+    console.error("Error updating user:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+async function deleteUser(userId) {
+  const db = getFirestore();
+  try {
+    // Check if user exists
+    const userDoc = await db.collection("volunteers").doc(userId).get();
+    if (!userDoc.exists) {
+      return { success: false, error: "User not found" };
+    }
+
+    const userData = userDoc.data();
+
+    // Delete the user document
+    await db.collection("volunteers").doc(userId).delete();
+
+    return { 
+      success: true, 
+      userId: userId,
+      userID: userData.user_ID,
+      message: "User deleted successfully"
+    };
+  } catch (error) {
+    console.error("Error deleting user:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+
 async function fetchRidesInRange(startDate, endDate) {
   const db = getFirestore();
   const ridesRef = db.collection('rides');
@@ -181,4 +414,18 @@ async function fetchRidesInRange(startDate, endDate) {
 
   return rides;
 }
-module.exports = { login, createRole, createPermission, getAllVolunteers, getVolunteersByOrganization, getRideById, fetchRidesInRange };
+module.exports = { 
+  login, 
+  createRole, 
+  createPermission, 
+  getAllVolunteers, 
+  getVolunteersByOrganization, 
+  getRideById,
+  getRidesByDriverId,
+  createUser,
+  getUserByEmail,
+  getUserById,
+  getUserByUserID,
+  updateUser,
+  deleteUser
+};
