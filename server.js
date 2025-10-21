@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
+const cors = require('cors');
 const { db } = require('./firebase');         
 const applicationLayer = require('./ApplicationLayer');
 const calendarRoutes = require("./calendar");
@@ -17,7 +18,30 @@ const port = 3000;
 // ================================
 // Middleware
 // ================================
-app.use(bodyParser.json());
+
+// --- CORS Configuration ---
+// configure CORS to allow resource sharing between specific origins
+const allowedOrigins = [
+    'https://app.flutterflow.io', // Allow FlutterFlow's testing environment
+    'https://your-deployed-flutterflow-domain.com', // Your live web domain
+    'http://localhost:3000', // Local development
+    // Other domains that need to access the API go here
+];
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) === -1) {
+      const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+      return callback(new Error(msg), false);
+    }
+    return callback(null, true);
+  }
+};
+
+app.use(cors(corsOptions));
+app.use(bodyParser.json()); 
 
 // ================================
 // Login Endpoint
