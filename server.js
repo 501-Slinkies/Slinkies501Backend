@@ -22,8 +22,7 @@ const port = 3000;
 // --- CORS Configuration ---
 // configure CORS to allow resource sharing between specific origins
 const allowedOrigins = [
-    'https://app.flutterflow.io', // Allow FlutterFlow's testing environment
-    'https://your-deployed-flutterflow-domain.com', // Your live web domain
+    'https://slinkies-712r84.flutterflow.app//api/rides', // Live flutterflow domain
     'http://localhost:3000', // Local development
     // Other domains that need to access the API go here
 ];
