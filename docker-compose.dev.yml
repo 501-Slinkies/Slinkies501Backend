@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: teamslinkies-dev
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - JWT_SECRET=${JWT_SECRET}
+      - SESSION_TIMEOUT_MINUTES=${SESSION_TIMEOUT_MINUTES:-15}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - ENABLE_HTTPS_REDIRECT=false
+      - ENABLE_RATE_LIMITING=false
+      - SENDGRID_API_KEY=${SENDGRID_API_KEY}
+      - SENDGRID_FROM_EMAIL=${SENDGRID_FROM_EMAIL}
+      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID}
+      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN}
+      - TWILIO_PHONE_NUMBER=${TWILIO_PHONE_NUMBER}
+      # Use Firestore emulator for development
+      - FIRESTORE_EMULATOR_HOST=firestore-emulator:8080
+    volumes:
+      # Mount source code for hot-reload
+      - .:/app
+      - /app/node_modules  # Prevent overwriting node_modules
+      - ./serviceAccountKey.json:/app/serviceAccountKey.json:ro
+    networks:
+      - teamslinkies-dev-network
+    depends_on:
+      - firestore-emulator
+
+  # Firebase Firestore Emulator for local development
+  firestore-emulator:
+    image: google/cloud-sdk:alpine
+    container_name: firestore-emulator
+    command: gcloud emulators firestore start --host-port=0.0.0.0:8080
+    ports:
+      - "8080:8080"
+      - "4000:4000"  # Firebase UI
+    networks:
+      - teamslinkies-dev-network
+    environment:
+      - FIRESTORE_PROJECT_ID=dev-project
+
+networks:
+  teamslinkies-dev-network:
+    driver: bridge
+
+

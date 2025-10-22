@@ -23,7 +23,20 @@
         "start": "node server.js",
         "test": "node test.js",
         "emulator": "firebase emulators:start",
-        "migrate:dev": "firebase emulators:exec 'node csvMigration.js' --only firestore"
+        "migrate:dev": "firebase emulators:exec 'node csvMigration.js' --only firestore",
+        "docker:build": "docker build -t teamslinkies:latest .",
+        "docker:build:dev": "docker build -t teamslinkies:dev -f Dockerfile.dev .",
+        "docker:run": "docker-compose up",
+        "docker:run:detached": "docker-compose up -d",
+        "docker:run:dev": "docker-compose -f docker-compose.dev.yml up",
+        "docker:stop": "docker-compose down",
+        "docker:logs": "docker-compose logs -f",
+        "docker:clean": "docker-compose down -v && docker system prune -f",
+        "gcr:build": "docker build -t us-central1-docker.pkg.dev/slinkies501backend/teamslinkies/teamslinkies:latest .",
+        "gcr:push": "docker push us-central1-docker.pkg.dev/slinkies501backend/teamslinkies/teamslinkies:latest",
+        "gcr:deploy": "gcloud run deploy teamslinkies --image us-central1-docker.pkg.dev/slinkies501backend/teamslinkies/teamslinkies:latest --region us-central1 --allow-unauthenticated --port 3000",
+        "gcr:logs": "gcloud logging read 'resource.type=cloud_run_revision' --limit 50",
+        "gcr:url": "gcloud run services describe teamslinkies --region us-central1 --format='value(status.url)'"
     },
     "devDependencies": {
         "firebase-tools": "^14.17.0"

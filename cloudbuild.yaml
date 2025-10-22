@@ -1,0 +1,67 @@
+# Google Cloud Build configuration for TeamSlinkies
+# This file enables automatic builds when you push to your repository
+
+steps:
+  # Step 1: Build the Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: 
+      - 'build'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/teamslinkies:$COMMIT_SHA'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/teamslinkies:latest'
+      - '.'
+
+  # Step 2: Push the image to Google Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: 
+      - 'push'
+      - 'gcr.io/$PROJECT_ID/teamslinkies:$COMMIT_SHA'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: 
+      - 'push'
+      - 'gcr.io/$PROJECT_ID/teamslinkies:latest'
+
+  # Step 3: Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'teamslinkies'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/teamslinkies:$COMMIT_SHA'
+      - '--region'
+      - 'us-central1'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+      - '--port'
+      - '3000'
+      - '--memory'
+      - '512Mi'
+      - '--cpu'
+      - '1'
+      - '--max-instances'
+      - '10'
+      - '--min-instances'
+      - '0'
+      - '--set-env-vars'
+      - 'NODE_ENV=production'
+      - '--set-secrets'
+      - 'JWT_SECRET=jwt-secret:latest,ENCRYPTION_KEY=encryption-key:latest,SENDGRID_API_KEY=sendgrid-api-key:latest,TWILIO_ACCOUNT_SID=twilio-account-sid:latest,TWILIO_AUTH_TOKEN=twilio-auth-token:latest'
+
+# Build options
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: 'E2_HIGHCPU_8'
+
+# Substitution variables (can be overridden)
+substitutions:
+  _REGION: 'us-central1'
+  _SERVICE_NAME: 'teamslinkies'
+  _PORT: '3000'
+
+# Build timeout (30 minutes)
+timeout: '1800s'

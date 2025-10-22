@@ -1,0 +1,89 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: teamslinkies-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # Node environment
+      - NODE_ENV=production
+      - PORT=3000
+      
+      # JWT Configuration (use secrets in production)
+      - JWT_SECRET=${JWT_SECRET}
+      - SESSION_TIMEOUT_MINUTES=${SESSION_TIMEOUT_MINUTES:-15}
+      
+      # Encryption
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      
+      # Security
+      - ENABLE_HTTPS_REDIRECT=${ENABLE_HTTPS_REDIRECT:-false}
+      - ENABLE_RATE_LIMITING=${ENABLE_RATE_LIMITING:-true}
+      
+      # SendGrid (Email Notifications)
+      - SENDGRID_API_KEY=${SENDGRID_API_KEY}
+      - SENDGRID_FROM_EMAIL=${SENDGRID_FROM_EMAIL}
+      
+      # Twilio (SMS Notifications)
+      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID}
+      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN}
+      - TWILIO_PHONE_NUMBER=${TWILIO_PHONE_NUMBER}
+    
+    volumes:
+      # Mount Firebase service account key as a secret
+      - ./serviceAccountKey.json:/app/serviceAccountKey.json:ro
+      
+      # Optional: Mount logs directory for persistence
+      - ./logs:/app/logs
+    
+    networks:
+      - teamslinkies-network
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    # Resource limits (adjust based on your needs)
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+  # Optional: NGINX reverse proxy for TLS termination and load balancing
+  nginx:
+    image: nginx:alpine
+    container_name: teamslinkies-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - app
+    networks:
+      - teamslinkies-network
+    profiles:
+      - with-nginx
+
+networks:
+  teamslinkies-network:
+    driver: bridge
+
+volumes:
+  logs:
+    driver: local
+
+

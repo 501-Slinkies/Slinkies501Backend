@@ -107,7 +107,9 @@ firebase deploy --only firestore:rules
 
 ## 🚀 Running the Application
 
-### Development Mode
+### Option 1: Node.js (Traditional)
+
+#### Development Mode
 
 ```bash
 npm start
@@ -115,7 +117,7 @@ npm start
 
 The server will start on `http://localhost:3000`
 
-### Using Firestore Emulator (Development)
+#### Using Firestore Emulator (Development)
 
 ```bash
 # Start the emulator
@@ -124,6 +126,33 @@ npm run emulator
 # In a separate terminal, run migrations
 npm run migrate:dev
 ```
+
+### Option 2: Docker (Recommended for Production)
+
+**Quick Start:**
+
+```bash
+# Copy environment template
+cp env.template .env
+# Edit .env with your actual values
+
+# Build and run
+npm run docker:build
+npm run docker:run:detached
+
+# View logs
+npm run docker:logs
+```
+
+**Development with hot-reload:**
+
+```bash
+npm run docker:run:dev
+```
+
+For detailed Docker deployment instructions, see:
+- **[QUICK_START_DOCKER.md](./QUICK_START_DOCKER.md)** - Get started in 5 minutes
+- **[DOCKER_DEPLOYMENT.md](./DOCKER_DEPLOYMENT.md)** - Complete deployment guide
 
 ## 📚 API Documentation
 
