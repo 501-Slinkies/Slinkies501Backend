@@ -259,7 +259,7 @@ async function createRide(rideData) {
 
         const docRef = db.collection("rides").doc();
         await docRef.set(newRide);
-        
+
         newRide.ride_id = docRef.id; // Set ride_id after creation
         console.log(`Successfully created ride with ID: ${docRef.id}`);
         return { uid: docRef.id, ...newRide };
@@ -270,3 +270,24 @@ async function createRide(rideData) {
 }
 
 module.exports = { createClient, createVolunteer, createAddress, createRide };
+
+
+// --- Main Execution ---
+
+(async () => {
+    // Set optional limits for testing, or comment out to process all rows.
+    migrateClients.limit = 5;
+    migrateVolunteers.limit = 5;
+    migrateCallData.limit = 5;
+
+    console.log("Starting client migration...");
+    await migrateClients("./fakeClients.csv");
+
+    console.log("\nStarting volunteer migration...");
+    await migrateVolunteers("./fakeStaff.csv");
+
+    console.log("\nStarting call data migration...");
+    await migrateCallData("./fakeCalls.csv");
+
+    console.log("\nAll migrations complete.");
+})();
