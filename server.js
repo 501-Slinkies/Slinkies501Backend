@@ -22,8 +22,8 @@ const port = 3000;
 // --- CORS Configuration ---
 // configure CORS to allow resource sharing between specific origins
 const allowedOrigins = [
+    'https://app.flutterflow.io', // Flutterflow testing domain
     'https://slinkies-712r84.flutterflow.app', // Live flutterflow domain
-    'http://localhost:3000', // Local development
     // Other domains that need to access the API go here
 ];
 
@@ -502,7 +502,7 @@ app.get('/api/drivers/:driverID/rides', async (req, res) => {
 // Endpoint to match drivers for a specific ride
 // This endpoint takes a ride document ID and returns available/unavailable drivers
 // based on their availability and the ride's timeframe (PickupTime, AppointmentTime, EstimatedDuration, TripType)
-app.get('/rides/:rideId/match-drivers', async (req, res) => {
+app.get('/api/rides/:rideId/match-drivers', async (req, res) => {
   try {
     const { rideId } = req.params;
     

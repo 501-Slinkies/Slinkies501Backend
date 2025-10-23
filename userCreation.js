@@ -31,7 +31,7 @@ async function createClient(clientData) {
 
         // --- Data Normalization and Defaulting ---
 
-        // (Formerly Base User Fields)
+        const client_id = docRef ? docRef.id : null; // Will be set after doc creation
         const contact_type_preference = clientData.contact_type_preference || 'phone';
         const account_status = clientData.account_status || 'active';
         const month_year_of_birth = clientData.month_year_of_birth || '';
@@ -39,8 +39,6 @@ async function createClient(clientData) {
         const ok_to_text = is_cell ? Boolean(clientData.ok_to_text) : false;
         const secondary_phone = clientData.secondary_phone || null;
         const secondary_is_cell = Boolean(clientData.secondary_is_cell) || false;
-
-        // (Client-Specific Fields)
         const street_address = clientData.street_address || '';
         const address_2 = clientData.address_2 || '';
         const city = clientData.city || '';
@@ -77,6 +75,7 @@ async function createClient(clientData) {
             service_animal,
             comments,
             // Metadata
+            client_id,
             contact_type_preference,
             account_status,
             date_created: new Date(),
@@ -110,7 +109,7 @@ async function createVolunteer(volunteerData) {
 
         // --- Data Normalization and Defaulting ---
 
-        // (Formerly Base User Fields)
+        const volunteer_id = docRef ? docRef.id : null; // Will be set after doc creation
         const contact_type_preference = volunteerData.contact_type_preference || 'phone';
         const account_status = volunteerData.account_status || 'active';
         const month_year_of_birth = volunteerData.month_year_of_birth || '';
@@ -118,9 +117,6 @@ async function createVolunteer(volunteerData) {
         const ok_to_text = is_cell ? Boolean(volunteerData.ok_to_text) : false;
         const secondary_phone = volunteerData.secondary_phone || null;
         const secondary_is_cell = Boolean(volunteerData.secondary_is_cell) || false;
-
-        // (Volunteer-Specific Fields)
-        const access_id = volunteerData.access_id || null;
         const position = volunteerData.position || 'driver';
         const training_date = volunteerData.training_date || null;
         const orientation_date = volunteerData.orientation_date || null;
@@ -146,7 +142,7 @@ async function createVolunteer(volunteerData) {
             secondary_phone,
             secondary_is_cell,
             // Volunteer-Specific Details
-            access_id,
+            volunteer_id,
             position,
             training_date,
             orientation_date,
@@ -230,6 +226,7 @@ async function createRide(rideData) {
         // --- Data Normalization and Defaulting ---
         const wheelchair = Boolean(rideData.wheelchair) || false;
         const newRide = {
+            ride_id: null, // Will be set after doc creation
             client_ref,
             date,
             end_location_address_ref,
@@ -262,7 +259,8 @@ async function createRide(rideData) {
 
         const docRef = db.collection("rides").doc();
         await docRef.set(newRide);
-
+        
+        newRide.ride_id = docRef.id; // Set ride_id after creation
         console.log(`Successfully created ride with ID: ${docRef.id}`);
         return { uid: docRef.id, ...newRide };
     } catch (error) {
