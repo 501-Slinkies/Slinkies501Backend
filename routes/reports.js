@@ -106,3 +106,20 @@ async function getVolunteerData(startDate, endDate, organization) {
   }));
 }
 
+
+// Fetch Client Metadata
+async function getClientMetadata(startDate, endDate, organization) {
+  let query = db.collection("clients");
+  if (organization) query = query.where("organization_id", "==", organization);
+  const snapshot = await query.get();
+
+  return snapshot.docs.map(doc => ({
+    security_assignment: doc.data().security_assignment || "",
+    date_enrolled: doc.data().date_enrolled || "",
+    m_f: doc.data().m_f || ""
+  }));
+}
+
+
+
+module.exports = router;
