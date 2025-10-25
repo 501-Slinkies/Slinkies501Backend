@@ -59,6 +59,37 @@ router.post("/save", async (req, res) => {
   }
 });
 
+// GET /api/reports/saved/:user_id
+router.get("/saved/:user_id", async (req, res) => {
+  try {
+    const { user_id } = req.params;
+
+    if (!user_id) {
+      return res.status(400).json({ success: false, message: "Missing user_id" });
+    }
+
+    const snapshot = await db
+      .collection("savedReports")
+      .where("user_id", "==", user_id)
+      .orderBy("timestamp", "desc")
+      .get();
+
+    if (snapshot.empty) {
+      return res.json({ success: true, reports: [] });
+    }
+
+    const reports = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+
+    res.json({ success: true, reports });
+  } catch (error) {
+    console.error("Error fetching saved reports:", error);
+    res.status(500).json({ success: false, message: "Server error", error: error.message });
+  }
+});
+
 
 // Core report data generator
 async function getReportData(fields, startDate, endDate, organization) {
