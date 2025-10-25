@@ -81,18 +81,21 @@ async function getClientsData(startDate, endDate, organization) {
 // Fetch Rides
 async function getRideVolume(startDate, endDate, organization) {
   let query = db.collection("rides")
-    .where("ride_date", ">=", startDate)
-    .where("ride_date", "<=", endDate);
+    .where("date", ">=", startDate)
+    .where("date", "<=", endDate);
+
   if (organization) query = query.where("organization_id", "==", organization);
 
   const snapshot = await query.get();
 
   return snapshot.docs.map(doc => ({
-    ride_status: doc.data().ride_status || "",
-    trip_mileage: doc.data().trip_mileage || "",
-    driver_id: doc.data().driver_id || ""
-  }));
+    ride_status: doc.data().status || "", 
+    trip_mileage: doc.data().MilesDriven || doc.data().miles_driven || "", 
+    driver_id: doc.data().Driver || doc.data().driver_volunteer_ref || ""
+}));
+
 }
+
 
 // Fetch Volunteers
 async function getVolunteerData(startDate, endDate, organization) {
