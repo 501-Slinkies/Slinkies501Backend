@@ -37,9 +37,7 @@ router.get("/", async (req, res) => {
 });
 
 
-/**
- * Core report data generator
- */
+// Core report data generator
 async function getReportData(fields, startDate, endDate, organization) {
   const results = {};
 
@@ -60,4 +58,38 @@ async function getReportData(fields, startDate, endDate, organization) {
   }
 
   return results;
+}
+
+
+// Fetch Clients
+async function getClientsData(startDate, endDate, organization) {
+  let query = db.collection("clients");
+  if (organization) query = query.where("organization_id", "==", organization);
+  const snapshot = await query.get();
+
+  return snapshot.docs.map(doc => ({
+    client_name: doc.data().client_name || "",
+    date_of_birth: doc.data().date_of_birth || "",
+    volunteering_status: doc.data().volunteering_status || "",
+    mobility_assistance: doc.data().mobility_assistance || "",
+    date_enrolled: doc.data().date_enrolled || "",
+    m_f: doc.data().m_f || ""
+  }));
+}
+
+
+// Fetch Rides
+async function getRideVolume(startDate, endDate, organization) {
+  let query = db.collection("rides")
+    .where("ride_date", ">=", startDate)
+    .where("ride_date", "<=", endDate);
+  if (organization) query = query.where("organization_id", "==", organization);
+
+  const snapshot = await query.get();
+
+  return snapshot.docs.map(doc => ({
+    ride_status: doc.data().ride_status || "",
+    trip_mileage: doc.data().trip_mileage || "",
+    driver_id: doc.data().driver_id || ""
+  }));
 }
