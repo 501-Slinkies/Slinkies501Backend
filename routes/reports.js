@@ -37,3 +37,27 @@ router.get("/", async (req, res) => {
 });
 
 
+/**
+ * Core report data generator
+ */
+async function getReportData(fields, startDate, endDate, organization) {
+  const results = {};
+
+  if (fields.includes("client_name") || fields.includes("date_of_birth")) {
+    results.clients = await getClientsData(startDate, endDate, organization);
+  }
+
+  if (fields.includes("ride_status") || fields.includes("trip_mileage") || fields.includes("driver_id")) {
+    results.rides = await getRideVolume(startDate, endDate, organization);
+  }
+
+  if (fields.includes("volunteering_status") || fields.includes("mobility_assistance")) {
+    results.volunteers = await getVolunteerData(startDate, endDate, organization);
+  }
+
+  if (fields.includes("security_assignment") || fields.includes("date_enrolled") || fields.includes("m_f")) {
+    results.client_metadata = await getClientMetadata(startDate, endDate, organization);
+  }
+
+  return results;
+}
