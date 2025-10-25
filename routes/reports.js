@@ -93,3 +93,16 @@ async function getRideVolume(startDate, endDate, organization) {
     driver_id: doc.data().driver_id || ""
   }));
 }
+
+// Fetch Volunteers
+async function getVolunteerData(startDate, endDate, organization) {
+  let query = db.collection("volunteers");
+  if (organization) query = query.where("organization_id", "==", organization);
+
+  const snapshot = await query.get();
+  return snapshot.docs.map(doc => ({
+    volunteering_status: doc.data().volunteering_status || "",
+    mobility_assistance: doc.data().mobility_assistance || ""
+  }));
+}
+
