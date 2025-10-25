@@ -36,6 +36,29 @@ router.get("/", async (req, res) => {
   }
 });
 
+// POST /api/reports/save
+router.post("/save", async (req, res) => {
+  try {
+    const { user_id, selectedParams } = req.body;
+
+    if (!user_id || !selectedParams) {
+      return res.status(400).json({ success: false, message: "Missing user_id or selectedParams" });
+    }
+
+    // Save user's report selection (you can adjust the collection name as needed)
+    await db.collection("savedReports").add({
+      user_id,
+      selectedParams,
+      timestamp: new Date(),
+    });
+
+    res.json({ success: true, message: "Report parameters saved successfully" });
+  } catch (error) {
+    console.error("Error saving report:", error);
+    res.status(500).json({ success: false, message: "Server error", error: error.message });
+  }
+});
+
 
 // Core report data generator
 async function getReportData(fields, startDate, endDate, organization) {
