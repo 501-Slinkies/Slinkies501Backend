@@ -5,6 +5,20 @@ const router = express.Router();
 const { db } = require("../firebase");
 const _ = require("lodash"); // ensure lodash is installed (npm install lodash)
 
+router.get("/save/test", async (req, res) => {
+  try {
+    await db.collection("savedReports").add({
+      user_id: "flavio123",
+      selectedParams: { ride_status: true, trip_mileage: true },
+      timestamp: new Date(),
+    });
+    res.send("✅ Test document saved successfully!");
+  } catch (e) {
+    res.status(500).send("❌ Error: " + e.message);
+  }
+});
+
+
 /**
 GET /api/reports
 Example:
