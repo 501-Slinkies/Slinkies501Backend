@@ -154,6 +154,38 @@ async function migrateVolunteers(filePath) {
     console.log(`Volunteer migration finished. Processed ${count} rows.`);
 }
 
+/**
+ * Attempts to find a client's DocumentReference by their ID.
+ * If not found, it returns the client's name as a fallback.
+ * @param {string} clientId The Client ID from the CSV.
+ * @param {string} fullName The Client's full name from the CSV (e.g., "John Doe").
+ * @returns {Promise<FirebaseFirestore.DocumentReference|string|null>} A DocumentReference if found, 
+ * a name string if not found, or null if no identifier was provided.
+ */
+async function getClientReference(clientId, fullName) {
+    if (clientId) {
+        const clientRef = db.collection('clients').doc(clientId);
+        const clientDoc = await clientRef.get();
+
+        if (clientDoc.exists) {
+            // Client was found, return the reference.
+            return clientRef;
+        } else {
+            // Failure: ID was provided but not found in the DB.
+            console.warn(`Client ID ${clientId} not found. Defaulting to name: ${fullName}`);
+            // Return the name as the fallback.
+            return fullName || "Unknown (ID not found)";
+        }
+    }
+
+    if (fullName) {
+        console.warn(`Missing Client ID. Defaulting to name: ${fullName}`);
+        return fullName;
+    }
+
+    return null;
+}
+
 async function migrateCallData(filePath) {
     const rows = await loadCSV(filePath);
     let limit = migrateCallData.limit ?? rows.length;
@@ -168,8 +200,6 @@ async function migrateCallData(filePath) {
         }
 
         try {
-            // Step 1: Create or find the destination Address
-            // ** FIX: Use '|| null' to prevent 'undefined' from being passed **
             const addressData = {
                 nickname: row[findKey(row, 'NAME OF DESTINATION/PRACTICE/BUILDING')] || null,
                 street_address: row[findKey(row, 'DESTINATION STREET ADDRESS')] || null,
@@ -186,15 +216,24 @@ async function migrateCallData(filePath) {
             }
             const addressRef = await createOrFindAddress(addressData);
 
-            // Step 2: Create the Ride document
             const clientId = row[findKey(row, 'Client ID')];
-            if (!clientId) {
-                console.warn(`Skipping ride in row ${count}: Missing Client ID.`);
+            
+            // Get first and last name and combine them
+            const firstName = row[findKey(row, 'FIRST NAME')]?.trim();
+            const lastName = row[findKey(row, 'LAST NAME')]?.trim();
+            const clientFullName = (firstName || lastName) 
+                ? `${firstName || ''} ${lastName || ''}`.trim() 
+                : null; // Set to null if both are missing
+
+            const clientRefValue = await getClientReference(clientId, clientFullName);
+
+            if (!clientRefValue) {
+                console.warn(`Skipping ride in row ${count}: Missing Client ID and Client Name.`);
                 continue;
             }
 
             const rideData = {
-                client_ref: db.collection('clients').doc(clientId),
+                client_ref: clientRefValue, // This will be a Ref or a String
                 end_location_address_ref: addressRef,
                 date: row[findKey(row, 'DATE OF RIDE')] || null,
                 appointment_time: row[findKey(row, 'APPOINTMENT TIME')] || null,
@@ -205,7 +244,7 @@ async function migrateCallData(filePath) {
                 wheelchair: parseWheelchair(row[findKey(row, 'WHEELCHAIR')]),
                 external_comments: row[findKey(row, 'COMMENTS ABOUT RIDE')] || null,
             };
-
+            
             await createRide(rideData);
 
         } catch (error) {
@@ -219,9 +258,9 @@ async function migrateCallData(filePath) {
 
 (async () => {
     // Set optional limits for testing, or comment out to process all rows.
-    migrateClients.limit = 0;
-    migrateVolunteers.limit = 0;
-    migrateCallData.limit = 15;
+    //migrateClients.limit = 1;
+    //migrateVolunteers.limit = 1;
+    //migrateCallData.limit = 15;
 
     console.log("Starting client migration...");
     await migrateClients("./fakeClients.csv");
