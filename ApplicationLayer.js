@@ -587,6 +587,108 @@ async function getRideAppointmentInfo(uid) {
   }
 }
 
+// Create a new ride
+async function createRide(rideData) {
+  try {
+    // Define required fields
+    const requiredFields = ['UID', 'clientUID', 'Date', 'appointmentTime', 'appointment_type', 'purpose'];
+    
+    // Validate required fields
+    const missingFields = requiredFields.filter(field => !rideData[field]);
+    if (missingFields.length > 0) {
+      return {
+        success: false,
+        message: `Missing required fields: ${missingFields.join(', ')}`
+      };
+    }
+
+    // Add timestamps
+    rideData.CreatedAt = new Date();
+    rideData.UpdatedAt = new Date();
+
+    // Set default values for optional fields
+    if (!rideData.status) rideData.status = 'Scheduled';
+    if (!rideData.tripType) rideData.tripType = 'RoundTrip';
+    if (rideData.wheelchair === undefined) rideData.wheelchair = false;
+
+    const result = await dataAccess.createRide(rideData);
+
+    if (result.success) {
+      return {
+        success: true,
+        message: 'Ride created successfully',
+        ride: result.ride
+      };
+    } else {
+      return {
+        success: false,
+        message: result.error || 'Failed to create ride'
+      };
+    }
+  } catch (error) {
+    console.error('Error in createRide:', error);
+    return {
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    };
+  }
+}
+
+// Get all rides appointment info
+async function getAllRidesAppointmentInfo() {
+  try {
+    // Get all rides
+    const { db } = require('./firebase');
+    const ridesSnapshot = await db.collection("rides").get();
+
+    if (ridesSnapshot.empty) {
+      return {
+        success: true,
+        appointmentInfo: []
+      };
+    }
+
+    const appointmentInfoList = [];
+
+    for (const doc of ridesSnapshot.docs) {
+      const ride = doc.data();
+
+      // Get client information
+      let clientName = "Unknown";
+      if (ride.clientUID) {
+        const clientResult = await dataAccess.getClientByReference(ride.clientUID);
+        if (clientResult.success && clientResult.client) {
+          const client = clientResult.client;
+          clientName = `${client.first_name || ""} ${client.last_name || ""}`.trim();
+        }
+      }
+
+      appointmentInfoList.push({
+        uid: ride.UID,
+        date: ride.Date,
+        appointmentTime: ride.appointmentTime,
+        clientName: clientName,
+        appointmentType: ride.appointment_type,
+        status: ride.status,
+      });
+    }
+
+    return {
+      success: true,
+      appointmentInfo: appointmentInfoList,
+      total: appointmentInfoList.length
+    };
+  } catch (error) {
+    console.error('Error in getAllRidesAppointmentInfo:', error);
+    return {
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    };
+  }
+}
+
 // Get ride by UID
 async function getRideByUID(uid) {
   try {
@@ -695,9 +797,11 @@ module.exports = {
   loginUser, 
   createRoleWithPermissions, 
   verifyToken, 
+  createRide,
   matchDriversForRide,
   matchDriversForRideByUID,
   getRideAppointmentInfo,
+  getAllRidesAppointmentInfo,
   getRideByUID,
   updateRideByUID,
   parseDriverAvailability,
