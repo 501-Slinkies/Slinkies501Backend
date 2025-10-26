@@ -401,8 +401,8 @@ async function fetchRidesInRange(startDate, endDate) {
   const ridesRef = db.collection('rides');
 
   const snapshot = await ridesRef
-    .where('date', '>=', startDate)
-    .where('date', '<=', endDate)
+    .where('appointmentTime', '>=', new Date(startDate))
+    .where('appointmentTime', '<=', new Date(endDate))
     .get();
 
   if (snapshot.empty) return [];
@@ -414,6 +414,85 @@ async function fetchRidesInRange(startDate, endDate) {
 
   return rides;
 }
+
+async function getRideByUID(uid) {
+  const db = getFirestore();
+  try {
+    // Get the ride by UID field (not document ID)
+    const ridesSnapshot = await db.collection("rides")
+      .where("UID", "==", uid)
+      .get();
+
+    if (ridesSnapshot.empty) {
+      return { success: false, error: "Ride not found" };
+    }
+
+    const rideDoc = ridesSnapshot.docs[0];
+    return { 
+      success: true, 
+      ride: { id: rideDoc.id, ...rideDoc.data() } 
+    };
+  } catch (error) {
+    console.error("Error fetching ride by UID:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+async function updateRideByUID(uid, updateData) {
+  const db = getFirestore();
+  try {
+    // Get the ride by UID
+    const ridesSnapshot = await db.collection("rides")
+      .where("UID", "==", uid)
+      .get();
+
+    if (ridesSnapshot.empty) {
+      return { success: false, error: "Ride not found" };
+    }
+
+    const rideDoc = ridesSnapshot.docs[0];
+    const rideRef = rideDoc.ref;
+
+    // Update the document
+    await rideRef.update(updateData);
+
+    // Get the updated document
+    const updatedDoc = await rideRef.get();
+    
+    return {
+      success: true,
+      ride: { id: updatedDoc.id, ...updatedDoc.data() }
+    };
+  } catch (error) {
+    console.error("Error updating ride by UID:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+async function getClientByReference(clientRef) {
+  const db = getFirestore();
+  try {
+    if (!clientRef) {
+      return { success: false, error: "Client reference is required" };
+    }
+
+    // clientRef is already a Firestore reference
+    const clientDoc = await clientRef.get();
+    
+    if (!clientDoc.exists) {
+      return { success: false, error: "Client not found" };
+    }
+
+    return {
+      success: true,
+      client: { id: clientDoc.id, ...clientDoc.data() }
+    };
+  } catch (error) {
+    console.error("Error fetching client by reference:", error);
+    return { success: false, error: error.message };
+  }
+}
+
 module.exports = { 
   login, 
   createRole, 
@@ -421,11 +500,15 @@ module.exports = {
   getAllVolunteers, 
   getVolunteersByOrganization, 
   getRideById,
+  getRideByUID,
+  updateRideByUID,
+  getClientByReference,
   getRidesByDriverId,
   createUser,
   getUserByEmail,
   getUserById,
   getUserByUserID,
   updateUser,
-  deleteUser
+  deleteUser,
+  fetchRidesInRange
 };
