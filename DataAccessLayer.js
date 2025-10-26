@@ -415,6 +415,32 @@ async function fetchRidesInRange(startDate, endDate) {
   return rides;
 }
 
+async function createRide(rideData) {
+  const db = getFirestore();
+  try {
+    // Check if ride with this UID already exists
+    const existingRide = await db.collection("rides")
+      .where("UID", "==", rideData.UID)
+      .get();
+
+    if (!existingRide.empty) {
+      return { success: false, error: "Ride with this UID already exists" };
+    }
+
+    // Create the ride document
+    const rideRef = db.collection("rides").doc();
+    await rideRef.set(rideData);
+
+    return {
+      success: true,
+      ride: { id: rideRef.id, ...rideData }
+    };
+  } catch (error) {
+    console.error("Error creating ride:", error);
+    return { success: false, error: error.message };
+  }
+}
+
 async function getRideByUID(uid) {
   const db = getFirestore();
   try {
@@ -500,6 +526,7 @@ module.exports = {
   getAllVolunteers, 
   getVolunteersByOrganization, 
   getRideById,
+  createRide,
   getRideByUID,
   updateRideByUID,
   getClientByReference,

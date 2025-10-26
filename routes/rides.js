@@ -44,6 +44,46 @@ router.get("/calendar", async (req, res) => {
 });
 
 /**
+ * POST /api/rides
+ * Creates a new ride with the provided data
+ */
+router.post("/", async (req, res) => {
+  try {
+    const rideData = req.body;
+
+    const result = await applicationLayer.createRide(rideData);
+
+    if (result.success) {
+      res.status(201).json(result);
+    } else {
+      res.status(400).json(result);
+    }
+  } catch (error) {
+    console.error("Error creating ride:", error);
+    res.status(500).json({ success: false, message: "Server error", error: error.message });
+  }
+});
+
+/**
+ * GET /api/rides/appointment-info
+ * Returns appointment date, time, and client name for all rides
+ */
+router.get("/appointment-info", async (req, res) => {
+  try {
+    const result = await applicationLayer.getAllRidesAppointmentInfo();
+
+    if (result.success) {
+      res.json(result);
+    } else {
+      res.status(500).json(result);
+    }
+  } catch (error) {
+    console.error("Error fetching appointment info:", error);
+    res.status(500).json({ success: false, message: "Server error", error: error.message });
+  }
+});
+
+/**
  * GET /api/rides/:uid/match-drivers
  * Matches available drivers for a ride by UID
  */
@@ -65,32 +105,6 @@ router.get("/:uid/match-drivers", async (req, res) => {
     }
   } catch (error) {
     console.error("Error matching drivers:", error);
-    res.status(500).json({ success: false, message: "Server error", error: error.message });
-  }
-});
-
-/**
- * GET /api/rides/:uid/appointment-info
- * Returns appointment date, time, and client name for a ride
- */
-router.get("/:uid/appointment-info", async (req, res) => {
-  try {
-    const { uid } = req.params;
-    
-    if (!uid) {
-      return res.status(400).json({ success: false, message: "UID is required" });
-    }
-
-    const result = await applicationLayer.getRideAppointmentInfo(uid);
-
-    if (result.success) {
-      res.json(result);
-    } else {
-      const statusCode = result.message.includes('not found') ? 404 : 500;
-      res.status(statusCode).json(result);
-    }
-  } catch (error) {
-    console.error("Error fetching appointment info:", error);
     res.status(500).json({ success: false, message: "Server error", error: error.message });
   }
 });

@@ -38,7 +38,66 @@ This document describes the updated ride functionality that now uses the new Fir
 
 ## API Endpoints
 
-### 1. GET `/api/rides/:uid/match-drivers`
+### 1. POST `/api/rides`
+Creates a new ride with the provided data.
+
+**Request:**
+```
+POST /api/rides
+Content-Type: application/json
+
+{
+  "UID": "RIDE001",
+  "clientUID": "clients/abc123",
+  "Date": "2024-01-15",
+  "appointmentTime": "2024-01-15T10:00:00Z",
+  "appointment_type": "Medical",
+  "purpose": "Doctor appointment",
+  "pickupTme": "2024-01-15T09:30:00Z",
+  "estimatedDuration": 60,
+  "tripType": "RoundTrip",
+  "wheelchair": false,
+  "status": "Scheduled"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Ride created successfully",
+  "ride": {
+    "id": "doc_id",
+    "UID": "RIDE001",
+    "clientUID": "clients/abc123",
+    "Date": "2024-01-15",
+    "appointmentTime": "2024-01-15T10:00:00Z",
+    "appointment_type": "Medical",
+    "purpose": "Doctor appointment",
+    "pickupTme": "2024-01-15T09:30:00Z",
+    "estimatedDuration": 60,
+    "tripType": "RoundTrip",
+    "wheelchair": false,
+    "status": "Scheduled",
+    "CreatedAt": "2024-01-10T12:00:00Z",
+    "UpdatedAt": "2024-01-10T12:00:00Z"
+  }
+}
+```
+
+**Required Fields:**
+- `UID` - Unique identifier for the ride
+- `clientUID` - Reference to the client
+- `Date` - Date of the ride
+- `appointmentTime` - DateTime of the appointment
+- `appointment_type` - Type of appointment
+- `purpose` - Purpose of the ride
+
+**Optional Fields:**
+- All other fields from the schema are optional
+- Default values: `status = "Scheduled"`, `tripType = "RoundTrip"`, `wheelchair = false`
+
+### 2. GET `/api/rides/:uid/match-drivers`
 Matches available drivers for a ride by UID instead of rideId.
 
 **Request:**
@@ -74,30 +133,41 @@ GET /api/rides/ABC123/match-drivers
 }
 ```
 
-### 2. GET `/api/rides/:uid/appointment-info`
-Returns appointment date, time, and client name.
+### 3. GET `/api/rides/appointment-info`
+Returns appointment date, time, and client name for all rides.
 
 **Request:**
 ```
-GET /api/rides/ABC123/appointment-info
+GET /api/rides/appointment-info
 ```
 
 **Response:**
 ```json
 {
   "success": true,
-  "appointmentInfo": {
-    "uid": "ABC123",
-    "date": "2024-01-15",
-    "appointmentTime": "2024-01-15T10:00:00Z",
-    "clientName": "Jane Smith",
-    "appointmentType": "Medical",
-    "status": "Scheduled"
-  }
+  "appointmentInfo": [
+    {
+      "uid": "ABC123",
+      "date": "2024-01-15",
+      "appointmentTime": "2024-01-15T10:00:00Z",
+      "clientName": "Jane Smith",
+      "appointmentType": "Medical",
+      "status": "Scheduled"
+    },
+    {
+      "uid": "XYZ789",
+      "date": "2024-01-16",
+      "appointmentTime": "2024-01-16T14:00:00Z",
+      "clientName": "John Doe",
+      "appointmentType": "Shopping",
+      "status": "Assigned"
+    }
+  ],
+  "total": 2
 }
 ```
 
-### 3. PUT `/api/rides/:uid`
+### 4. PUT `/api/rides/:uid`
 Updates a ride's data. Only fields in the schema are allowed.
 
 **Request:**
@@ -127,7 +197,7 @@ Content-Type: application/json
 }
 ```
 
-### 4. GET `/api/rides/:uid`
+### 5. GET `/api/rides/:uid`
 Gets a single ride by UID.
 
 **Request:**
@@ -149,7 +219,7 @@ GET /api/rides/ABC123
 }
 ```
 
-### 5. GET `/api/rides/calendar`
+### 6. GET `/api/rides/calendar`
 Provides ride data for a calendar view (updated to use appointmentTime field).
 
 **Request:**
