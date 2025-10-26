@@ -30,8 +30,6 @@ async function createClient(clientData) {
         if (!email) console.warn("Warning: Missing email for client", first_name, last_name);
 
         // --- Data Normalization and Defaulting ---
-
-        const client_id = docRef ? docRef.id : null; // Will be set after doc creation
         const contact_type_preference = clientData.contact_type_preference || 'phone';
         const account_status = clientData.account_status || 'active';
         const month_year_of_birth = clientData.month_year_of_birth || '';
@@ -75,13 +73,15 @@ async function createClient(clientData) {
             service_animal,
             comments,
             // Metadata
-            client_id,
+            client_id: null,
             contact_type_preference,
             account_status,
             date_created: new Date(),
         };
 
         const docRef = db.collection("clients").doc();
+        newClient.client_id = docRef.id;
+
         await docRef.set(newClient);
 
         console.log(`Successfully created client ${first_name} ${last_name} with ID: ${docRef.id}`);
@@ -108,8 +108,6 @@ async function createVolunteer(volunteerData) {
         if (!validateEmail(email)) throw new Error("Invalid email for volunteer");
 
         // --- Data Normalization and Defaulting ---
-
-        const volunteer_id = docRef ? docRef.id : null; // Will be set after doc creation
         const contact_type_preference = volunteerData.contact_type_preference || 'phone';
         const account_status = volunteerData.account_status || 'active';
         const month_year_of_birth = volunteerData.month_year_of_birth || '';
@@ -142,7 +140,7 @@ async function createVolunteer(volunteerData) {
             secondary_phone,
             secondary_is_cell,
             // Volunteer-Specific Details
-            volunteer_id,
+            volunteer_id: null,
             position,
             training_date,
             orientation_date,
@@ -161,6 +159,8 @@ async function createVolunteer(volunteerData) {
         };
 
         const docRef = db.collection("volunteers").doc();
+        newVolunteer.volunteer_id = docRef.id;
+        
         await docRef.set(newVolunteer);
 
         console.log(`Successfully created volunteer ${first_name} ${last_name} with ID: ${docRef.id}`);
@@ -188,6 +188,7 @@ async function createAddress(addressData) {
 
         // --- Data Normalization and Defaulting ---
         const newAddress = {
+            address_id: null,
             street_address,
             city,
             state: addressData.state || null,
@@ -199,6 +200,8 @@ async function createAddress(addressData) {
         };
 
         const docRef = db.collection("addresses").doc();
+        newAddress.address_id = docRef.id;
+        
         await docRef.set(newAddress);
 
         console.log(`Successfully created address with ID: ${docRef.id}`);
@@ -226,7 +229,7 @@ async function createRide(rideData) {
         // --- Data Normalization and Defaulting ---
         const wheelchair = Boolean(rideData.wheelchair) || false;
         const newRide = {
-            ride_id: null, // Will be set after doc creation
+            ride_id: null,
             client_ref,
             date,
             end_location_address_ref,
@@ -258,9 +261,10 @@ async function createRide(rideData) {
         };
 
         const docRef = db.collection("rides").doc();
+        newRide.ride_id = docRef.id;
+
         await docRef.set(newRide);
-        
-        newRide.ride_id = docRef.id; // Set ride_id after creation
+
         console.log(`Successfully created ride with ID: ${docRef.id}`);
         return { uid: docRef.id, ...newRide };
     } catch (error) {
