@@ -63,8 +63,8 @@ function parseTripType(tripTypeStr) {
  */
 async function createOrFindAddress(addressData) {
     // Ensure defaults are handled before querying
-    addressData.state = addressData.state || null;
-    addressData.zip = addressData.zip || null;
+    addressData.state = addressData.state || "NY";
+    addressData.zip = addressData.zip || "00000";
 
     const addressesRef = db.collection('addresses');
     const q = addressesRef
