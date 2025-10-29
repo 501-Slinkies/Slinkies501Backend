@@ -35,32 +35,27 @@ router.get("/", async (req, res) => {
 });
 
 
-/**
- * ✅ POST /api/reports/save
- * Used by FlutterFlow to save selected filters (button click)
- */
+// ✅ POST /api/reports/save 
 router.post("/save", async (req, res) => {
   try {
     let { user_id, selectedParams } = req.body;
 
-    // If selectedParams comes in as "field_1,field_2" (string), convert
+    // if selectedParams comes as string: "[first_name,last_name]"
     if (typeof selectedParams === "string") {
       try {
-        selectedParams = JSON.parse(selectedParams);
+        selectedParams = JSON.parse(selectedParams);  // try JSON first
       } catch {
-        selectedParams = selectedParams.split(",").map(field => field.trim());
+        selectedParams = selectedParams
+          .replace(/[\[\]]/g, "") // remove []
+          .split(",")             // split into array
+          .map(f => f.trim());
       }
     }
 
-    // If FF doesn't send user_id, assign a default
-    if (!user_id) {
-      user_id = "frontend_default_user";
-    }
-
-    if (!selectedParams || selectedParams.length === 0) {
+    if (!user_id || !selectedParams || selectedParams.length === 0) {
       return res.status(400).json({
         success: false,
-        message: "selectedParams is required"
+        message: "Missing user_id or selectedParams"
       });
     }
 
@@ -72,15 +67,15 @@ router.post("/save", async (req, res) => {
 
     res.json({
       success: true,
-      message: "Report parameters saved successfully",
+      message: "Saved successfully",
       document_id: docRef.id
     });
 
   } catch (error) {
-    console.error("Error saving report:", error);
     res.status(500).json({ success: false, message: "Server error", error: error.message });
   }
 });
+
 
 
 /**
