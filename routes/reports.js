@@ -115,24 +115,57 @@ async function getReportData(fields, startDate, endDate, organization) {
 }
 
 
-// Fetch Clients
+// Fetch Clients (that supports camelCase + snake_case)
 async function getClientsData(startDate, endDate, organization) {
   let query = db.collection("clients");
   if (organization) query = query.where("organization_id", "==", organization);
+
   const snapshot = await query.get();
 
-  return snapshot.docs.map(doc => ({
-    client_name: doc.data().client_name || "",
-    date_of_birth: doc.data().date_of_birth || "",
-    volunteering_status: doc.data().volunteering_status || "",
-    mobility_assistance: doc.data().mobility_assistance || "",
-    date_enrolled: doc.data().date_enrolled || "",
-    m_f: doc.data().m_f || ""
-  }));
+  return snapshot.docs.map(doc => {
+    const client = doc.data();
+
+    return {
+      client_name:
+        client.client_name ||
+        client.clientName ||
+        `${client.first_name || client.firstName || ""} ${client.last_name || client.lastName || ""}`.trim(),
+
+      date_of_birth:
+        client.date_of_birth ||
+        client.birth_month_year ||
+        client.birthMonthYear ||
+        "",
+
+      volunteering_status:
+        client.volunteering_status ||
+        client.volunteeringStatus ||
+        "",
+
+      mobility_assistance:
+        client.mobility_assistance ||
+        client.MobilityAidType ||
+        client.mobilityAidType ||
+        "",
+
+      date_enrolled:
+        client.date_enrolled ||
+        client.DateCreated ||
+        client.dateCreated ||
+        "",
+
+      m_f:
+        client.m_f ||
+        client.Gender ||
+        client.gender ||
+        ""
+    };
+  });
 }
 
 
-// Fetch Rides
+
+// Fetch Rides (that supports camelCase + snake_case)
 async function getRideVolume(startDate, endDate, organization) {
   let query = db.collection("rides")
     .where("date", ">=", startDate)
@@ -142,25 +175,79 @@ async function getRideVolume(startDate, endDate, organization) {
 
   const snapshot = await query.get();
 
-  return snapshot.docs.map(doc => ({
-    ride_status: doc.data().status || "", 
-    trip_mileage: doc.data().MilesDriven || doc.data().miles_driven || "", 
-    driver_id: doc.data().Driver || doc.data().driver_volunteer_ref || ""
-}));
+  return snapshot.docs.map(doc => {
+    const ride = doc.data();
 
+    return {
+      ride_status:
+        ride.ride_status ||
+        ride.rideStatus ||
+        ride.status ||
+        "",
+
+      trip_mileage:
+        ride.trip_mileage ||
+        ride.tripMileage ||
+        ride.MilesDriven ||
+        ride.miles_driven ||
+        "",
+
+      driver_id:
+        ride.driver_id ||
+        ride.Driver ||
+        ride.driverVolunteerRef ||
+        ride.driver_volunteer_ref ||
+        ""
+    };
+  });
 }
 
 
-// Fetch Volunteers
+
+// Fetch Volunteers (that supports camelCase + snake_case)
 async function getVolunteerData(startDate, endDate, organization) {
   let query = db.collection("volunteers");
   if (organization) query = query.where("organization_id", "==", organization);
 
   const snapshot = await query.get();
-  return snapshot.docs.map(doc => ({
-    volunteering_status: doc.data().volunteering_status || "",
-    mobility_assistance: doc.data().mobility_assistance || ""
-  }));
+
+  return snapshot.docs.map(doc => {
+    const volunteer = doc.data();
+
+    return {
+      volunteering_status:
+        volunteer.volunteering_status ||
+        volunteer.volunteeringStatus ||
+        volunteer.status ||
+        "",
+
+      mobility_assistance:
+        volunteer.mobility_assistance ||
+        volunteer.MobilityAidType ||
+        volunteer.mobilityAidType ||
+        "",
+
+      driver_availability:
+        volunteer.driver_availability_by_day_and_time ||
+        volunteer.driverAvailability ||
+        "",
+
+      max_rides_week:
+        volunteer.max_rides_week ||
+        volunteer.maxRidesWeek ||
+        "",
+
+      primary_phone:
+        volunteer.primary_phone ||
+        volunteer.primaryPhone ||
+        "",
+
+      email_address:
+        volunteer.email_address ||
+        volunteer.emailAddress ||
+        ""
+    };
+  });
 }
 
 
@@ -176,7 +263,6 @@ async function getClientMetadata(startDate, endDate, organization) {
     m_f: doc.data().m_f || ""
   }));
 }
-
 
 
 module.exports = router;
