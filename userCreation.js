@@ -3,6 +3,7 @@
  */
 
 const { db } = require('./firebase');
+const crypto = require('crypto');
 
 /**
  * Validates if a string is a properly formatted email address.
@@ -15,10 +16,24 @@ function validateEmail(email) {
 }
 
 /**
+ * Hashes a password with a salt using SHA-256.
+ * @param {string} password The plain-text password.
+ * @param {string} salt The salt string.
+ * @returns {string} The SHA-256 hash as a hex string, or "" if no password.
+ */
+function hashPassword(password, salt) {
+    if (!password) return "";
+    // A simple salt-and-hash.
+    // For production, consider crypto.pbkdf2Sync for better security (key stretching).
+    return crypto.createHash('sha256')
+                 .update(password + salt) // Simple concatenation
+                 .digest('hex');
+}
+
+
+/**
  * Creates a new client document in the 'clients' collection.
- * @param {object} clientData - Object containing all client information. All keys should match the new schema.
- * @returns {Promise<object>} A promise that resolves to the newly created client object, including its UID.
- * @throws {Error} Throws an error if required fields are missing or invalid.
+ * (No changes in this function)
  */
 async function createClient(clientData) {
     try {
@@ -111,6 +126,8 @@ async function createVolunteer(volunteerData) {
         // --- Data Normalization and Defaulting (using new field names) ---
         const primary_is_cell = Boolean(volunteerData.primary_is_cell) || false;
         const secondary_is_cell = Boolean(volunteerData.secondary_is_cell) || false;
+        
+        const passwordHash = hashPassword(volunteerData.password, salt); // Hash the password
 
         // --- Construct Final Volunteer Object (matching new schema) ---
         const newVolunteer = {
@@ -132,7 +149,7 @@ async function createVolunteer(volunteerData) {
             state: volunteerData.state || "", 
             // Volunteer-Specific Details
             volunteer_id: "",  // (Will be set to doc.id)
-            role: volunteerData.role || 'driver',
+            roles: [volunteerData.role || 'driver'], // <-- UPDATED: 'role' to 'roles' array
             when_trained_by_lifespan: volunteerData.when_trained_by_lifespan || "", 
             when_oriented_position: volunteerData.when_oriented_position || "", 
             date_began_volunteering: volunteerData.date_began_volunteering || "", 
@@ -158,7 +175,7 @@ async function createVolunteer(volunteerData) {
             data1_fromdate: volunteerData.data1_fromdate || "", 
             data2_toDate: volunteerData.data2_toDate || "", 
             comments: volunteerData.comments || "", 
-            password: sha256(volunteerData.password) || "", // Hash the password
+            password_hash: passwordHash,
             date_created: new Date().toISOString(),
         };
 
@@ -177,9 +194,6 @@ async function createVolunteer(volunteerData) {
 
 /**
  * Creates a new destination document in the 'destination' collection.
- * @param {object} addressData - Object containing address information. Keys should match 'destination' schema.
- * @returns {Promise<object>} A promise that resolves to the new destination object with its ID.
- * @throws {Error} Throws an error if required fields are missing.
  */
 async function createAddress(addressData) {
     try {
@@ -218,9 +232,6 @@ async function createAddress(addressData) {
 
 /**
  * Creates a new ride document in the 'rides' collection.
- * @param {object} rideData - Object containing ride information. Keys should match 'rides' schema.
- * @returns {Promise<object>} A promise that resolves to the new ride object with its ID.
- * @throws {Error} Throws an error if required fields are missing.
  */
 async function createRide(rideData) {
     try {
