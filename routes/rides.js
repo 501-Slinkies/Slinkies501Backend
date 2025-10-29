@@ -1,10 +1,8 @@
 // Set up rides.js
 
-
 const express = require("express");
 const router = express.Router();
-const { db } = require("../firebase"); // No more circular dependency
-
+const applicationLayer = require("../ApplicationLayer");
 
 /**
  * GET /api/rides/calendar
@@ -32,29 +30,134 @@ router.get("/calendar", async (req, res) => {
       }
     }
 
-    const start = new Date(startDate);
-    const end = new Date(endDate);
+    const result = await applicationLayer.getRidesByTimeframe(startDate, endDate);
 
-    // Build Firestore query
-    let query = db.collection("rides")
-      .where("rideDate", ">=", start)
-      .where("rideDate", "<=", end);
-
-    if (status) query = query.where("status", "==", status);
-    if (driverId) query = query.where("assignedDriver", "==", driverId);
-
-    const snapshot = await query.get();
-    const rides = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
-    res.json({
-      success: true,
-      total: rides.length,
-      startDate,
-      endDate,
-      rides,
-    });
+    if (result.success) {
+      res.json(result);
+    } else {
+      res.status(500).json(result);
+    }
   } catch (error) {
     console.error("Error fetching calendar rides:", error);
+    res.status(500).json({ success: false, message: "Server error", error: error.message });
+  }
+});
+
+/**
+ * POST /api/rides
+ * Creates a new ride with the provided data
+ */
+router.post("/", async (req, res) => {
+  try {
+    const rideData = req.body;
+
+    const result = await applicationLayer.createRide(rideData);
+
+    if (result.success) {
+      res.status(201).json(result);
+    } else {
+      res.status(400).json(result);
+    }
+  } catch (error) {
+    console.error("Error creating ride:", error);
+    res.status(500).json({ success: false, message: "Server error", error: error.message });
+  }
+});
+
+/**
+ * GET /api/rides/appointment-info
+ * Returns appointment date, time, and client name for all rides
+ */
+router.get("/appointment-info", async (req, res) => {
+  try {
+    const result = await applicationLayer.getAllRidesAppointmentInfo();
+
+    if (result.success) {
+      res.json(result);
+    } else {
+      res.status(500).json(result);
+    }
+  } catch (error) {
+    console.error("Error fetching appointment info:", error);
+    res.status(500).json({ success: false, message: "Server error", error: error.message });
+  }
+});
+
+/**
+ * GET /api/rides/:uid/match-drivers
+ * Matches available drivers for a ride by UID
+ */
+router.get("/:uid/match-drivers", async (req, res) => {
+  try {
+    const { uid } = req.params;
+    
+    if (!uid) {
+      return res.status(400).json({ success: false, message: "UID is required" });
+    }
+
+    const result = await applicationLayer.matchDriversForRideByUID(uid);
+
+    if (result.success) {
+      res.json(result);
+    } else {
+      const statusCode = result.message.includes('not found') ? 404 : 500;
+      res.status(statusCode).json(result);
+    }
+  } catch (error) {
+    console.error("Error matching drivers:", error);
+    res.status(500).json({ success: false, message: "Server error", error: error.message });
+  }
+});
+
+/**
+ * PUT /api/rides/:uid
+ * Updates a ride's data (with permission checks)
+ */
+router.put("/:uid", async (req, res) => {
+  try {
+    const { uid } = req.params;
+    const updateData = req.body;
+
+    if (!uid) {
+      return res.status(400).json({ success: false, message: "UID is required" });
+    }
+
+    const result = await applicationLayer.updateRideByUID(uid, updateData);
+
+    if (result.success) {
+      res.json(result);
+    } else {
+      const statusCode = result.message.includes('not found') ? 404 : 400;
+      res.status(statusCode).json(result);
+    }
+  } catch (error) {
+    console.error("Error updating ride:", error);
+    res.status(500).json({ success: false, message: "Server error", error: error.message });
+  }
+});
+
+/**
+ * GET /api/rides/:uid
+ * Gets a single ride by UID
+ */
+router.get("/:uid", async (req, res) => {
+  try {
+    const { uid } = req.params;
+    
+    if (!uid) {
+      return res.status(400).json({ success: false, message: "UID is required" });
+    }
+
+    const result = await applicationLayer.getRideByUID(uid);
+
+    if (result.success) {
+      res.json(result);
+    } else {
+      const statusCode = result.message.includes('not found') ? 404 : 500;
+      res.status(statusCode).json(result);
+    }
+  } catch (error) {
+    console.error("Error fetching ride:", error);
     res.status(500).json({ success: false, message: "Server error", error: error.message });
   }
 });

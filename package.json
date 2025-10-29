@@ -17,6 +17,7 @@
         "fs": "^0.0.1-security",
         "helmet": "^7.1.0",
         "jsonwebtoken": "^9.0.2",
+        "lodash": "^4.17.21",
         "twilio": "^5.10.2"
     },
     "scripts": {
