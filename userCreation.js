@@ -48,7 +48,7 @@ async function createClient(clientData) {
             secondary_allow_text: secondary_iscell ? Boolean(clientData.secondary_allow_text) : false,
             // Address Info
             street_address: clientData.street_address || '',
-            address2: clientData.address2 || '', // Renamed
+            address2: clientData.address2 || '',
             city: clientData.city || '',
             state: clientData.state || '',
             zip: clientData.zip || '',
@@ -76,7 +76,7 @@ async function createClient(clientData) {
             gender: clientData.gender || null,
             how_did_they_hear_about_us: clientData.how_did_they_hear_about_us || null,
             client_status: clientData.client_status || 'active',
-            date_enrolled: new Date().toISOString(), // UPDATED: Changed to string
+            date_enrolled: new Date().toISOString(),
             temp_date: clientData.temp_date || null,
         };
 
@@ -202,15 +202,15 @@ async function createAddress(addressData) {
             // 'common_purpose' and 'date_created' are removed
         };
 
-        const docRef = db.collection("destination").doc(); // UPDATED: Collection name
-        newAddress.destination_id = docRef.id; // UPDATED: Field name
+        const docRef = db.collection("destination").doc();
+        newAddress.destination_id = docRef.id;
         
         await docRef.set(newAddress);
 
         console.log(`Successfully created destination with ID: ${docRef.id}`);
-        return { destination_id: docRef.id, ...newAddress }; // UPDATED: Field name
+        return { destination_id: docRef.id, ...newAddress };
     } catch (error) {
-        console.error("Error creating destination:", error); // UPDATED: Log message
+        console.error("Error creating destination:", error);
         throw error;
     }
 }
@@ -224,8 +224,8 @@ async function createAddress(addressData) {
 async function createRide(rideData) {
     try {
         // --- Validation (using new field names) ---
-        const { clientUID, Date, destinationUID } = rideData;
-        if (!clientUID || !Date || !destinationUID) {
+        const { clientUID, Date: rideDate, destinationUID } = rideData;
+        if (!clientUID || !rideDate || !destinationUID) {
             throw new Error("Missing required ride fields (clientUID, Date, destinationUID)");
         }
 
@@ -237,7 +237,7 @@ async function createRide(rideData) {
             organization: rideData.organization || null,
             clientUID,
             destinationUID,
-            Date,
+            Date: rideDate,
             additionalClient1_name: rideData.additionalClient1_name || null,
             additionalClient1_rel: rideData.additionalClient1_rel || null,
             driverUID: rideData.driverUID || null,
@@ -263,8 +263,8 @@ async function createRide(rideData) {
             internalComment: rideData.internalComment || null,
             externalComment: rideData.externalComment || null,
             incidentReport: rideData.incidentReport || null,
-            CreatedAt: new Date().toISOString(), // UPDATED: Changed to string
-            UpdatedAt: new Date().toISOString(), // UPDATED: Changed to string
+            CreatedAt: new Date().toISOString(),
+            UpdatedAt: new Date().toISOString(),
         };
 
         const docRef = db.collection("rides").doc();
