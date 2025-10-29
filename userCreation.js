@@ -158,7 +158,8 @@ async function createVolunteer(volunteerData) {
             data1_fromdate: volunteerData.data1_fromdate || "", 
             data2_toDate: volunteerData.data2_toDate || "", 
             comments: volunteerData.comments || "", 
-            // 'password' and 'roles' subcollection are omitted
+            password: sha256(volunteerData.password) || "", // Hash the password
+            date_created: new Date().toISOString(),
         };
 
         const docRef = db.collection("volunteers").doc();
@@ -198,8 +199,8 @@ async function createAddress(addressData) {
             address_2: addressData.address_2 || "", 
             nickname: addressData.nickname || "", 
             organization: addressData.organization || "", 
-            entered_by: addressData.entered_by || "", 
-            // 'common_purpose' and 'date_created' are removed
+            entered_by: addressData.entered_by || "System",
+            date_created: new Date().toISOString(),
         };
 
         const docRef = db.collection("destination").doc();
