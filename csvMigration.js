@@ -25,16 +25,16 @@ function findKey(row, target) {
 /**
  * Parses a string representing a duration (e.g., "30 min", "1 hr") into an integer of minutes.
  * @param {string} durationStr The string to parse.
- * @returns {number|null} The duration in minutes, or null if parsing fails.
+ * @returns {number|""} The duration in minutes, or "" if parsing fails.
  */
 function parseDuration(durationStr) {
-    if (!durationStr) return null;
+    if (!durationStr) return "";
     let totalMinutes = 0;
     const hourMatch = durationStr.match(/(\d+)\s*hr/);
     const minMatch = durationStr.match(/(\d+)\s*min/);
     if (hourMatch) totalMinutes += parseInt(hourMatch[1], 10) * 60;
     if (minMatch) totalMinutes += parseInt(minMatch[1], 10);
-    return totalMinutes > 0 ? totalMinutes : null;
+    return totalMinutes > 0 ? totalMinutes : "";
 }
 
 /**
@@ -67,7 +67,7 @@ async function createOrFindAddress(addressData) {
     addressData.state = addressData.state || "NY";
     addressData.zip = addressData.zip || "00000";
 
-    const addressesRef = db.collection('destination'); // UPDATED: Collection name
+    const addressesRef = db.collection('destination');
     const q = addressesRef
         .where('street_address', '==', addressData.street_address)
         .where('city', '==', addressData.city)
@@ -83,7 +83,7 @@ async function createOrFindAddress(addressData) {
     } else {
         console.log(`Creating new destination for: ${addressData.nickname || addressData.street_address}`);
         const newAddress = await createAddress(addressData); // This function now creates a 'destination'
-        return db.collection('destination').doc(newAddress.destination_id); // UPDATED: Collection and ID
+        return db.collection('destination').doc(newAddress.destination_id);
     }
 }
 
@@ -109,18 +109,17 @@ async function migrateClients(filePath) {
     for (const row of rows) {
         if (count++ >= limit) break;
 
-        // UPDATED: Field names to match 'clients' collection
         const clientData = {
-            first_name: row[findKey(row, "FIRST NAME")]?.trim() || null,
-            last_name: row[findKey(row, "LAST NAME")]?.trim() || null,
-            primary_phone: row[findKey(row, "PRIMARY PHONE")]?.trim() || null,
-            email_address: row[findKey(row, "EMAIL ADDRESS")]?.trim() || null, // Renamed
-            street_address: row[findKey(row, "STREET ADDRESS")]?.trim() || null,
-            address2: row[findKey(row, "ADDRESS 2")]?.trim() || null, // Renamed
-            city: row[findKey(row, "CITY")]?.trim() || null,
-            state: row[findKey(row, "STATE")]?.trim() || null,
-            zip: row[findKey(row, "ZIP")]?.trim() || row[findKey(row, "ZIP ")]?.trim() || null,
-            client_status: row[findKey(row, "CLIENT STATUS")]?.trim() || 'active', // Renamed
+            first_name: row[findKey(row, "FIRST NAME")]?.trim() || "",
+            last_name: row[findKey(row, "LAST NAME")]?.trim() || "",
+            primary_phone: row[findKey(row, "PRIMARY PHONE")]?.trim() || "",
+            email_address: row[findKey(row, "EMAIL ADDRESS")]?.trim() || "", 
+            street_address: row[findKey(row, "STREET ADDRESS")]?.trim() || "",
+            address2: row[findKey(row, "ADDRESS 2")]?.trim() || "", 
+            city: row[findKey(row, "CITY")]?.trim() || "",
+            state: row[findKey(row, "STATE")]?.trim() || "",
+            zip: row[findKey(row, "ZIP")]?.trim() || row[findKey(row, "ZIP ")]?.trim() || "",
+            client_status: row[findKey(row, "CLIENT STATUS")]?.trim() || 'active', 
         };
 
         try {
@@ -139,13 +138,13 @@ async function migrateVolunteers(filePath) {
     for (const row of rows) {
         if (count++ >= limit) break;
 
-        // UPDATED: Field names to match 'volunteers' collection
         const volunteerData = {
-            first_name: row[findKey(row, "FIRST NAME")]?.trim() || null,
-            last_name: row[findKey(row, "LAST NAME")]?.trim() || null,
-            primary_phone: row[findKey(row, "PRIMARY PHONE")]?.trim() || null,
-            email_address: row[findKey(row, "EMAIL ADDRESS")]?.trim() || null, // Renamed
-            role: row[findKey(row, "VOLUNTEER POSITION")] || 'driver', // Renamed
+            first_name: row[findKey(row, "FIRST NAME")]?.trim() || "",
+            last_name: row[findKey(row, "LAST NAME")]?.trim() || "",
+            primary_phone: row[findKey(row, "PRIMARY PHONE")]?.trim() || "",
+            email_address: row[findKey(row, "EMAIL ADDRESS")]?.trim() || "", 
+            role: row[findKey(row, "VOLUNTEER POSITION")] || 'driver', 
+            password: row[findKey(row, "PASSWORD")]?.trim() || "defaultPassword", // Default password if none provided
         };
 
         try {
@@ -172,22 +171,20 @@ async function migrateCallData(filePath) {
 
         try {
             // Step 1: Create or find the destination
-            // UPDATED: Field names to match 'destination' collection
             const addressData = {
-                nickname: row[findKey(row, 'NAME OF DESTINATION/PRACTICE/BUILDING')] || null,
-                street_address: row[findKey(row, 'DESTINATION STREET ADDRESS')] || null,
-                address_2: row[findKey(row, 'DESTINATION ADDRESS 2')] || null, // Kept snake_case
-                city: row[findKey(row, 'CITY')] || null,
-                state: row[findKey(row, 'STATE')] || null,
-                zip: row[findKey(row, 'ZIP')] || null,
-                // 'common_purpose' field is gone
+                nickname: row[findKey(row, 'NAME OF DESTINATION/PRACTICE/BUILDING')] || "",
+                street_address: row[findKey(row, 'DESTINATION STREET ADDRESS')] || "",
+                address_2: row[findKey(row, 'DESTINATION ADDRESS 2')] || "",
+                city: row[findKey(row, 'CITY')] || "",
+                state: row[findKey(row, 'STATE')] || "",
+                zip: row[findKey(row, 'ZIP')] || "",
             };
 
             if (!addressData.street_address || !addressData.city) {
                 console.warn(`Skipping ride in row ${count}: Missing essential address details.`);
                 continue;
             }
-            const addressRef = await createOrFindAddress(addressData); // This now returns a ref to 'destination'
+            const addressRef = await createOrFindAddress(addressData);
 
             // Step 2: Create the Ride document
             const clientId = row[findKey(row, 'Client ID')];
@@ -196,18 +193,18 @@ async function migrateCallData(filePath) {
                 continue;
             }
 
-            // UPDATED: Field names to match 'rides' collection
             const rideData = {
-                clientUID: db.collection('clients').doc(clientId), // Renamed
-                destinationUID: addressRef, // Renamed
-                Date: row[findKey(row, 'DATE OF RIDE')] || null, // Renamed
-                appointmentTime: row[findKey(row, 'APPOINTMENT TIME')] || null, // Renamed
-                pickupTme: row[findKey(row, 'PICK UP TIME')] || null, // Renamed
-                estimatedDuration: parseDuration(row[findKey(row, 'ESTIMATED LENGTH OF APPOINTMENT')]), // Renamed
-                purpose: row[findKey(row, 'PURPOSE OF TRIP')] || null,
-                tripType: parseTripType(row[findKey(row, 'ROUND TRIP OR ONE WAY')]), // Renamed
+                clientUID: db.collection('clients').doc(clientId), 
+                destinationUID: addressRef, 
+                Date: row[findKey(row, 'DATE OF RIDE')] || "", 
+                appointmentTime: row[findKey(row, 'APPOINTMENT TIME')] || "", 
+                pickupTme: row[findKey(row, 'PICK UP TIME')] || "", 
+                estimatedDuration: parseDuration(row[findKey(row, 'ESTIMATED LENGTH OF APPOINTMENT')]), 
+                purpose: row[findKey(row, 'PURPOSE OF TRIP')] || "",
+                tripType: parseTripType(row[findKey(row, 'ROUND TRIP OR ONE WAY')]), 
                 wheelchair: parseWheelchair(row[findKey(row, 'WHEELCHAIR')]),
-                externalComment: row[findKey(row, 'COMMENTS ABOUT RIDE')] || null, // Renamed
+                externalComment: row[findKey(row, 'COMMENTS ABOUT RIDE')] || "", 
+                
             };
 
             await createRide(rideData);
