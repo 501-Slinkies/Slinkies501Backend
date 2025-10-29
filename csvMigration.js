@@ -7,6 +7,7 @@
 const fs = require("fs");
 const csv = require("csv-parser");
 const { db } = require('./firebase');
+// createAddress function now creates a 'destination'
 const { createClient, createVolunteer, createAddress, createRide } = require('./userCreation.js');
 
 // --- Utility Functions ---
@@ -57,16 +58,16 @@ function parseTripType(tripTypeStr) {
 }
 
 /**
- * Checks for an existing address to avoid duplicates, or creates a new one.
+ * Checks for an existing destination (f.k.a. address) to avoid duplicates, or creates a new one.
  * @param {object} addressData The address data extracted from a CSV row.
- * @returns {Promise<FirebaseFirestore.DocumentReference>} A reference to the new or existing address document.
+ * @returns {Promise<FirebaseFirestore.DocumentReference>} A reference to the new or existing destination document.
  */
 async function createOrFindAddress(addressData) {
     // Ensure defaults are handled before querying
     addressData.state = addressData.state || "NY";
     addressData.zip = addressData.zip || "00000";
 
-    const addressesRef = db.collection('addresses');
+    const addressesRef = db.collection('destination'); // UPDATED: Collection name
     const q = addressesRef
         .where('street_address', '==', addressData.street_address)
         .where('city', '==', addressData.city)
@@ -77,12 +78,12 @@ async function createOrFindAddress(addressData) {
     const snapshot = await q.get();
 
     if (!snapshot.empty) {
-        console.log(`Found existing address for: ${addressData.nickname || addressData.street_address}`);
+        console.log(`Found existing destination for: ${addressData.nickname || addressData.street_address}`);
         return snapshot.docs[0].ref;
     } else {
-        console.log(`Creating new address for: ${addressData.nickname || addressData.street_address}`);
-        const newAddress = await createAddress(addressData);
-        return db.collection('addresses').doc(newAddress.address_id);
+        console.log(`Creating new destination for: ${addressData.nickname || addressData.street_address}`);
+        const newAddress = await createAddress(addressData); // This function now creates a 'destination'
+        return db.collection('destination').doc(newAddress.destination_id); // UPDATED: Collection and ID
     }
 }
 
@@ -108,17 +109,18 @@ async function migrateClients(filePath) {
     for (const row of rows) {
         if (count++ >= limit) break;
 
+        // UPDATED: Field names to match 'clients' collection
         const clientData = {
             first_name: row[findKey(row, "FIRST NAME")]?.trim() || null,
             last_name: row[findKey(row, "LAST NAME")]?.trim() || null,
             primary_phone: row[findKey(row, "PRIMARY PHONE")]?.trim() || null,
-            email: row[findKey(row, "EMAIL ADDRESS")]?.trim() || null,
+            email_address: row[findKey(row, "EMAIL ADDRESS")]?.trim() || null, // Renamed
             street_address: row[findKey(row, "STREET ADDRESS")]?.trim() || null,
-            address_2: row[findKey(row, "ADDRESS 2")]?.trim() || null,
+            address2: row[findKey(row, "ADDRESS 2")]?.trim() || null, // Renamed
             city: row[findKey(row, "CITY")]?.trim() || null,
             state: row[findKey(row, "STATE")]?.trim() || null,
             zip: row[findKey(row, "ZIP")]?.trim() || row[findKey(row, "ZIP ")]?.trim() || null,
-            account_status: row[findKey(row, "CLIENT STATUS")]?.trim() || 'active',
+            client_status: row[findKey(row, "CLIENT STATUS")]?.trim() || 'active', // Renamed
         };
 
         try {
@@ -137,12 +139,13 @@ async function migrateVolunteers(filePath) {
     for (const row of rows) {
         if (count++ >= limit) break;
 
+        // UPDATED: Field names to match 'volunteers' collection
         const volunteerData = {
             first_name: row[findKey(row, "FIRST NAME")]?.trim() || null,
             last_name: row[findKey(row, "LAST NAME")]?.trim() || null,
             primary_phone: row[findKey(row, "PRIMARY PHONE")]?.trim() || null,
-            email: row[findKey(row, "EMAIL ADDRESS")]?.trim() || null,
-            position: row[findKey(row, "VOLUNTEER POSITION")] || 'driver',
+            email_address: row[findKey(row, "EMAIL ADDRESS")]?.trim() || null, // Renamed
+            role: row[findKey(row, "VOLUNTEER POSITION")] || 'driver', // Renamed
         };
 
         try {
@@ -152,38 +155,6 @@ async function migrateVolunteers(filePath) {
         }
     }
     console.log(`Volunteer migration finished. Processed ${count} rows.`);
-}
-
-/**
- * Attempts to find a client's DocumentReference by their ID.
- * If not found, it returns the client's name as a fallback.
- * @param {string} clientId The Client ID from the CSV.
- * @param {string} fullName The Client's full name from the CSV (e.g., "John Doe").
- * @returns {Promise<FirebaseFirestore.DocumentReference|string|null>} A DocumentReference if found, 
- * a name string if not found, or null if no identifier was provided.
- */
-async function getClientReference(clientId, fullName) {
-    if (clientId) {
-        const clientRef = db.collection('clients').doc(clientId);
-        const clientDoc = await clientRef.get();
-
-        if (clientDoc.exists) {
-            // Client was found, return the reference.
-            return clientRef;
-        } else {
-            // Failure: ID was provided but not found in the DB.
-            console.warn(`Client ID ${clientId} not found. Defaulting to name: ${fullName}`);
-            // Return the name as the fallback.
-            return fullName || "Unknown (ID not found)";
-        }
-    }
-
-    if (fullName) {
-        console.warn(`Missing Client ID. Defaulting to name: ${fullName}`);
-        return fullName;
-    }
-
-    return null;
 }
 
 async function migrateCallData(filePath) {
@@ -200,51 +171,45 @@ async function migrateCallData(filePath) {
         }
 
         try {
+            // Step 1: Create or find the destination
+            // UPDATED: Field names to match 'destination' collection
             const addressData = {
                 nickname: row[findKey(row, 'NAME OF DESTINATION/PRACTICE/BUILDING')] || null,
                 street_address: row[findKey(row, 'DESTINATION STREET ADDRESS')] || null,
-                address_2: row[findKey(row, 'DESTINATION ADDRESS 2')] || null,
+                address_2: row[findKey(row, 'DESTINATION ADDRESS 2')] || null, // Kept snake_case
                 city: row[findKey(row, 'CITY')] || null,
                 state: row[findKey(row, 'STATE')] || null,
                 zip: row[findKey(row, 'ZIP')] || null,
-                common_purpose: row[findKey(row, 'PURPOSE OF TRIP')] || null,
+                // 'common_purpose' field is gone
             };
 
             if (!addressData.street_address || !addressData.city) {
                 console.warn(`Skipping ride in row ${count}: Missing essential address details.`);
                 continue;
             }
-            const addressRef = await createOrFindAddress(addressData);
+            const addressRef = await createOrFindAddress(addressData); // This now returns a ref to 'destination'
 
+            // Step 2: Create the Ride document
             const clientId = row[findKey(row, 'Client ID')];
-            
-            // Get first and last name and combine them
-            const firstName = row[findKey(row, 'FIRST NAME')]?.trim();
-            const lastName = row[findKey(row, 'LAST NAME')]?.trim();
-            const clientFullName = (firstName || lastName) 
-                ? `${firstName || ''} ${lastName || ''}`.trim() 
-                : null; // Set to null if both are missing
-
-            const clientRefValue = await getClientReference(clientId, clientFullName);
-
-            if (!clientRefValue) {
-                console.warn(`Skipping ride in row ${count}: Missing Client ID and Client Name.`);
+            if (!clientId) {
+                console.warn(`Skipping ride in row ${count}: Missing Client ID.`);
                 continue;
             }
 
+            // UPDATED: Field names to match 'rides' collection
             const rideData = {
-                client_ref: clientRefValue, // This will be a Ref or a String
-                end_location_address_ref: addressRef,
-                date: row[findKey(row, 'DATE OF RIDE')] || null,
-                appointment_time: row[findKey(row, 'APPOINTMENT TIME')] || null,
-                pickup_time: row[findKey(row, 'PICK UP TIME')] || null,
-                estimated_duration: parseDuration(row[findKey(row, 'ESTIMATED LENGTH OF APPOINTMENT')]),
+                clientUID: db.collection('clients').doc(clientId), // Renamed
+                destinationUID: addressRef, // Renamed
+                Date: row[findKey(row, 'DATE OF RIDE')] || null, // Renamed
+                appointmentTime: row[findKey(row, 'APPOINTMENT TIME')] || null, // Renamed
+                pickupTme: row[findKey(row, 'PICK UP TIME')] || null, // Renamed
+                estimatedDuration: parseDuration(row[findKey(row, 'ESTIMATED LENGTH OF APPOINTMENT')]), // Renamed
                 purpose: row[findKey(row, 'PURPOSE OF TRIP')] || null,
-                trip_type: parseTripType(row[findKey(row, 'ROUND TRIP OR ONE WAY')]),
+                tripType: parseTripType(row[findKey(row, 'ROUND TRIP OR ONE WAY')]), // Renamed
                 wheelchair: parseWheelchair(row[findKey(row, 'WHEELCHAIR')]),
-                external_comments: row[findKey(row, 'COMMENTS ABOUT RIDE')] || null,
+                externalComment: row[findKey(row, 'COMMENTS ABOUT RIDE')] || null, // Renamed
             };
-            
+
             await createRide(rideData);
 
         } catch (error) {
@@ -258,9 +223,9 @@ async function migrateCallData(filePath) {
 
 (async () => {
     // Set optional limits for testing, or comment out to process all rows.
-    //migrateClients.limit = 1;
-    //migrateVolunteers.limit = 1;
-    //migrateCallData.limit = 15;
+    migrateClients.limit = 0;
+    migrateVolunteers.limit = 0;
+    migrateCallData.limit = 15;
 
     console.log("Starting client migration...");
     await migrateClients("./fakeClients.csv");
@@ -273,4 +238,3 @@ async function migrateCallData(filePath) {
 
     console.log("\nAll migrations complete.");
 })();
-
