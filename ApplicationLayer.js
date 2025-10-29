@@ -168,14 +168,18 @@ function parseDriverAvailability(availabilityString) {
 
 // Helper function to calculate ride timeframe based on new schema
 function calculateRideTimeframe(ride) {
-  if (!ride.PickupTime || !ride.AppointmentTime || !ride.EstimatedDuration) {
+  // Support both old schema (PickupTime, AppointmentTime, TripType) and new schema (pickupTme, appointmentTime, tripType)
+  const pickupTimeField = ride.pickupTme || ride.PickupTime;
+  const appointmentTimeField = ride.appointmentTime || ride.AppointmentTime;
+  const estimatedDuration = ride.estimatedDuration || ride.EstimatedDuration;
+  const tripType = ride.tripType || ride.TripType;
+
+  if (!pickupTimeField || !appointmentTimeField || !estimatedDuration) {
     return null;
   }
   
-  const pickupTime = convertFirestoreTimestamp(ride.PickupTime);
-  const appointmentTime = convertFirestoreTimestamp(ride.AppointmentTime);
-  const estimatedDuration = ride.EstimatedDuration; // in minutes
-  const tripType = ride.TripType;
+  const pickupTime = convertFirestoreTimestamp(pickupTimeField);
+  const appointmentTime = convertFirestoreTimestamp(appointmentTimeField);
   
   if (!pickupTime || !appointmentTime) {
     return null;
@@ -414,30 +418,392 @@ async function matchDriversForRide(rideId) {
 
 // Calendar function (startDate, endDate)
 async function getRidesByTimeframe(startDate, endDate) {
-  const allRides = await dataAccess.fetchRidesInRange(startDate, endDate);
+  try {
+    const allRides = await dataAccess.fetchRidesInRange(startDate, endDate);
 
-  const grouped = {
-    assigned: [],
-    unassigned: [],
-    completed: [],
-    canceled: []
-  };
+    const grouped = {
+      assigned: [],
+      unassigned: [],
+      completed: [],
+      canceled: []
+    };
 
-  for (const ride of allRides) {
-    if (ride.status === 'assigned') grouped.assigned.push(ride);
-    else if (ride.status === 'unassigned') grouped.unassigned.push(ride);
-    else if (ride.status === 'completed') grouped.completed.push(ride);
-    else if (ride.status === 'canceled') grouped.canceled.push(ride);
+    for (const ride of allRides) {
+      if (ride.status === 'assigned' || ride.status === 'Assigned') grouped.assigned.push(ride);
+      else if (ride.status === 'unassigned' || ride.status === 'Unassigned') grouped.unassigned.push(ride);
+      else if (ride.status === 'completed' || ride.status === 'Completed') grouped.completed.push(ride);
+      else if (ride.status === 'canceled' || ride.status === 'Canceled' || ride.status === 'cancelled' || ride.status === 'Cancelled') grouped.canceled.push(ride);
+    }
+
+    return {
+      success: true,
+      total: allRides.length,
+      startDate,
+      endDate,
+      rides: allRides,
+      grouped
+    };
+  } catch (error) {
+    console.error('Error in getRidesByTimeframe:', error);
+    return {
+      success: false,
+      message: 'Failed to fetch rides',
+      error: error.message
+    };
   }
+}
 
-  return grouped;
+// Match drivers for a ride by UID
+async function matchDriversForRideByUID(uid) {
+  try {
+    // Get the ride by UID
+    const rideResult = await dataAccess.getRideByUID(uid);
+    if (!rideResult.success) {
+      return {
+        success: false,
+        message: 'Ride not found',
+        error: rideResult.error
+      };
+    }
+
+    const ride = rideResult.ride;
+    
+    // Calculate the ride timeframe using the new schema
+    const rideTimeframe = calculateRideTimeframe(ride);
+    if (!rideTimeframe) {
+      return {
+        success: false,
+        message: 'Invalid ride data: Missing pickupTime, appointmentTime, estimatedDuration, or tripType'
+      };
+    }
+
+    // Get all volunteers
+    const volunteersResult = await dataAccess.getAllVolunteers();
+    if (!volunteersResult.success) {
+      return {
+        success: false,
+        message: 'Failed to fetch volunteers',
+        error: volunteersResult.error
+      };
+    }
+
+    const volunteers = volunteersResult.volunteers;
+
+    // Sort volunteers into available and unavailable lists
+    const available = [];
+    const unavailable = [];
+
+    for (const volunteer of volunteers) {
+      if (volunteer.volunteering_status === 'Active') {
+        if (isVolunteerAvailableForTimeframe(volunteer, rideTimeframe)) {
+          available.push({
+            id: volunteer.id,
+            name: `${volunteer.first_name} ${volunteer.last_name}`,
+            email: volunteer.email_address,
+            phone: volunteer.primary_phone,
+            vehicle: volunteer.type_of_vehicle,
+          });
+        } else {
+          unavailable.push({
+            id: volunteer.id,
+            name: `${volunteer.first_name} ${volunteer.last_name}`,
+            email: volunteer.email_address,
+            phone: volunteer.primary_phone,
+            vehicle: volunteer.type_of_vehicle,
+            reason: 'Not available during requested timeframe'
+          });
+        }
+      }
+    }
+
+    return {
+      success: true,
+      ride: {
+        id: ride.id,
+        uid: ride.UID,
+        appointmentTime: ride.appointmentTime,
+        appointmentType: ride.appointment_type,
+        status: ride.status,
+      },
+      available,
+      summary: {
+        totalDrivers: volunteers.filter(v => v.volunteering_status === 'Active').length,
+        availableCount: available.length,
+        unavailableCount: unavailable.length
+      }
+    };
+  } catch (error) {
+    console.error('Error in matchDriversForRideByUID:', error);
+    return {
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    };
+  }
+}
+
+// Get ride appointment info by UID
+async function getRideAppointmentInfo(uid) {
+  try {
+    const rideResult = await dataAccess.getRideByUID(uid);
+    if (!rideResult.success) {
+      return {
+        success: false,
+        message: 'Ride not found',
+        error: rideResult.error
+      };
+    }
+
+    const ride = rideResult.ride;
+
+    // Get client information
+    let clientName = "Unknown";
+    if (ride.clientUID) {
+      const clientResult = await dataAccess.getClientByReference(ride.clientUID);
+      if (clientResult.success && clientResult.client) {
+        const client = clientResult.client;
+        clientName = `${client.first_name || ""} ${client.last_name || ""}`.trim();
+      }
+    }
+
+    return {
+      success: true,
+      appointmentInfo: {
+        uid: ride.UID,
+        date: ride.Date,
+        appointmentTime: ride.appointmentTime,
+        clientName: clientName,
+        appointmentType: ride.appointment_type,
+        status: ride.status,
+      }
+    };
+  } catch (error) {
+    console.error('Error in getRideAppointmentInfo:', error);
+    return {
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    };
+  }
+}
+
+// Create a new ride
+async function createRide(rideData) {
+  try {
+    // Define required fields
+    const requiredFields = ['UID', 'clientUID', 'Date', 'appointmentTime', 'appointment_type', 'purpose'];
+    
+    // Validate required fields
+    const missingFields = requiredFields.filter(field => !rideData[field]);
+    if (missingFields.length > 0) {
+      return {
+        success: false,
+        message: `Missing required fields: ${missingFields.join(', ')}`
+      };
+    }
+
+    // Add timestamps
+    rideData.CreatedAt = new Date();
+    rideData.UpdatedAt = new Date();
+
+    // Set default values for optional fields
+    if (!rideData.status) rideData.status = 'Scheduled';
+    if (!rideData.tripType) rideData.tripType = 'RoundTrip';
+    if (rideData.wheelchair === undefined) rideData.wheelchair = false;
+
+    const result = await dataAccess.createRide(rideData);
+
+    if (result.success) {
+      return {
+        success: true,
+        message: 'Ride created successfully',
+        ride: result.ride
+      };
+    } else {
+      return {
+        success: false,
+        message: result.error || 'Failed to create ride'
+      };
+    }
+  } catch (error) {
+    console.error('Error in createRide:', error);
+    return {
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    };
+  }
+}
+
+// Get all rides appointment info
+async function getAllRidesAppointmentInfo() {
+  try {
+    // Get all rides
+    const { db } = require('./firebase');
+    const ridesSnapshot = await db.collection("rides").get();
+
+    if (ridesSnapshot.empty) {
+      return {
+        success: true,
+        appointmentInfo: []
+      };
+    }
+
+    const appointmentInfoList = [];
+
+    for (const doc of ridesSnapshot.docs) {
+      const ride = doc.data();
+
+      // Get client information
+      let clientName = "Unknown";
+      if (ride.clientUID) {
+        const clientResult = await dataAccess.getClientByReference(ride.clientUID);
+        if (clientResult.success && clientResult.client) {
+          const client = clientResult.client;
+          clientName = `${client.first_name || ""} ${client.last_name || ""}`.trim();
+        }
+      }
+
+      appointmentInfoList.push({
+        uid: ride.UID,
+        date: ride.Date,
+        appointmentTime: ride.appointmentTime,
+        clientName: clientName,
+        appointmentType: ride.appointment_type,
+        status: ride.status,
+      });
+    }
+
+    return {
+      success: true,
+      appointmentInfo: appointmentInfoList,
+      total: appointmentInfoList.length
+    };
+  } catch (error) {
+    console.error('Error in getAllRidesAppointmentInfo:', error);
+    return {
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    };
+  }
+}
+
+// Get ride by UID
+async function getRideByUID(uid) {
+  try {
+    const result = await dataAccess.getRideByUID(uid);
+    if (!result.success) {
+      return {
+        success: false,
+        message: 'Ride not found',
+        error: result.error
+      };
+    }
+
+    return {
+      success: true,
+      ride: result.ride
+    };
+  } catch (error) {
+    console.error('Error in getRideByUID:', error);
+    return {
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    };
+  }
+}
+
+// Update ride by UID
+async function updateRideByUID(uid, updateData) {
+  try {
+    // Define allowed fields based on schema
+    const allowedFields = [
+      "clientUID",
+      "additionalClient1_name",
+      "additionalClient1_rel",
+      "driverUID",
+      "dispatcherUID",
+      "startLocation",
+      "destinationUID",
+      "Date",
+      "appointmentTime",
+      "appointment_type",
+      "pickupTme",
+      "estimatedDuration",
+      "purpose",
+      "tripType",
+      "status",
+      "wheelchair",
+      "wheelchairType",
+      "milesDriven",
+      "volunteerHours",
+      "donationReceived",
+      "donationAmount",
+      "confirmation1_Date",
+      "confirmation1_By",
+      "confirmation2_Date",
+      "confirmation2_By",
+      "internalComment",
+      "externalComment",
+      "incidentReport",
+    ];
+
+    // Filter out any fields that are not allowed
+    const validUpdates = {};
+    for (const [key, value] of Object.entries(updateData)) {
+      if (allowedFields.includes(key)) {
+        validUpdates[key] = value;
+      }
+    }
+
+    if (Object.keys(validUpdates).length === 0) {
+      return {
+        success: false,
+        message: 'No valid fields to update'
+      };
+    }
+
+    // Add UpdatedAt timestamp
+    validUpdates.UpdatedAt = new Date();
+
+    const result = await dataAccess.updateRideByUID(uid, validUpdates);
+
+    if (result.success) {
+      return {
+        success: true,
+        message: 'Ride updated successfully',
+        ride: result.ride,
+        updatedFields: Object.keys(validUpdates)
+      };
+    } else {
+      return {
+        success: false,
+        message: result.error || 'Failed to update ride'
+      };
+    }
+  } catch (error) {
+    console.error('Error in updateRideByUID:', error);
+    return {
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    };
+  }
 }
 
 module.exports = { 
   loginUser, 
   createRoleWithPermissions, 
   verifyToken, 
+  createRide,
   matchDriversForRide,
+  matchDriversForRideByUID,
+  getRideAppointmentInfo,
+  getAllRidesAppointmentInfo,
+  getRideByUID,
+  updateRideByUID,
   parseDriverAvailability,
   parseRideDateTime,
   isVolunteerAvailable,

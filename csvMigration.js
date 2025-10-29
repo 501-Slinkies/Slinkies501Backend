@@ -1,274 +1,240 @@
 /**
- * @fileoverview Standalone functions for creating client, volunteer, address, and ride records in Firestore.
+ * @fileoverview Script to migrate legacy CSV data into Firestore.
+ * This script reads CSV files for clients, volunteers (staff), and calls,
+ * then uses standalone creation functions to populate the corresponding Firestore collections.
  */
 
+const fs = require("fs");
+const csv = require("csv-parser");
 const { db } = require('./firebase');
+// createAddress function now creates a 'destination'
+const { createClient, createVolunteer, createAddress, createRide } = require('./userCreation.js');
+
+// --- Utility Functions ---
 
 /**
- * Validates if a string is a properly formatted email address.
- * @param {string} email The email string to validate.
- * @returns {boolean} True if the email is valid, otherwise false.
+ * Finds a key in a CSV row object, ignoring case and leading/trailing whitespace.
+ * @param {object} row The row object from the CSV parser.
+ * @param {string} target The target key name to find (e.g., "FIRST NAME").
+ * @returns {string|undefined} The matching key from the row object.
  */
-function validateEmail(email) {
-    // A simple regex for email validation.
-    return /\S+@\S+\.\S+/.test(email);
+function findKey(row, target) {
+    return Object.keys(row).find(k => k.trim().toUpperCase() === target.toUpperCase());
 }
 
 /**
- * Creates a new client document in the 'clients' collection.
- * @param {object} clientData - Object containing all client information. All keys should be in snake_case.
- * @returns {Promise<object>} A promise that resolves to the newly created client object, including its ID.
- * @throws {Error} Throws an error if required fields are missing or invalid.
+ * Parses a string representing a duration (e.g., "30 min", "1 hr") into an integer of minutes.
+ * @param {string} durationStr The string to parse.
+ * @returns {number|null} The duration in minutes, or null if parsing fails.
  */
-async function createClient(clientData) {
-    try {
-        // --- Validation ---
-        const { first_name, last_name, email, primary_phone } = clientData;
-        if (!first_name || !last_name) throw new Error("Missing name for client");
-        if (!primary_phone) throw new Error("Missing primary phone for client");
-        if (email && !validateEmail(email)) throw new Error("Invalid email format for client");
-        if (!email) console.warn("Warning: Missing email for client", first_name, last_name);
+function parseDuration(durationStr) {
+    if (!durationStr) return null;
+    let totalMinutes = 0;
+    const hourMatch = durationStr.match(/(\d+)\s*hr/);
+    const minMatch = durationStr.match(/(\d+)\s*min/);
+    if (hourMatch) totalMinutes += parseInt(hourMatch[1], 10) * 60;
+    if (minMatch) totalMinutes += parseInt(minMatch[1], 10);
+    return totalMinutes > 0 ? totalMinutes : null;
+}
 
-        const docRef = db.collection("clients").doc();
-        const client_id = docRef.id;
+/**
+ * Converts a 'Y'/'N' string to a boolean.
+ * @param {string} wheelchairStr The string indicating wheelchair need ('Y' or 'N').
+ * @returns {boolean} True if the input is 'Y' (case-insensitive), otherwise false.
+ */
+function parseWheelchair(wheelchairStr) {
+    return wheelchairStr ? wheelchairStr.trim().toUpperCase() === 'Y' : false;
+}
 
-        // --- Data Normalization and Defaulting ---
-        const contact_type_preference = clientData.contact_type_preference || 'phone';
-        const account_status = clientData.account_status || 'active';
-        const month_year_of_birth = clientData.month_year_of_birth || '';
-        const is_cell = Boolean(clientData.is_cell) || false;
-        const ok_to_text = is_cell ? Boolean(clientData.ok_to_text) : false;
-        const secondary_phone = clientData.secondary_phone || null;
-        const secondary_is_cell = Boolean(clientData.secondary_is_cell) || false;
-        const street_address = clientData.street_address || '';
-        const address_2 = clientData.address_2 || '';
-        const city = clientData.city || '';
-        const state = clientData.state || '';
-        const zip = clientData.zip || '';
-        const emergency_contacts = clientData.emergency_contacts || [];
-        const mobility_aid_type = clientData.mobility_aid_type || null;
-        const impairments = clientData.impairments || [];
-        const service_animal = Boolean(clientData.service_animal) || false;
-        const comments = clientData.comments || null;
+/**
+ * Normalizes the trip type string from the CSV.
+ * @param {string} tripTypeStr The raw trip type string.
+ * @returns {string} The normalized trip type ("RoundTrip" or "OneWay").
+ */
+function parseTripType(tripTypeStr) {
+    if (!tripTypeStr) return "OneWay";
+    const normalized = tripTypeStr.toLowerCase().replace(/\s+/g, '');
+    return normalized === 'roundtrip' ? 'RoundTrip' : 'OneWay';
+}
 
-        // --- Construct Final Client Object ---
-        const newClient = {
-            // Personal and Contact Info
-            first_name,
-            last_name,
-            month_year_of_birth,
-            email: email || '',
-            primary_phone,
-            is_cell,
-            ok_to_text,
-            secondary_phone,
-            secondary_is_cell,
-            // Address Info
-            street_address,
-            address_2,
-            city,
-            state,
-            zip,
-            // Client-Specific Details
-            emergency_contacts,
-            mobility_aid_type,
-            impairments,
-            service_animal,
-            comments,
-            // Metadata
-            client_id,
-            contact_type_preference,
-            account_status,
-            date_created: new Date(),
-        };
+/**
+ * Checks for an existing destination (f.k.a. address) to avoid duplicates, or creates a new one.
+ * @param {object} addressData The address data extracted from a CSV row.
+ * @returns {Promise<FirebaseFirestore.DocumentReference>} A reference to the new or existing destination document.
+ */
+async function createOrFindAddress(addressData) {
+    // Ensure defaults are handled before querying
+    addressData.state = addressData.state || "NY";
+    addressData.zip = addressData.zip || "00000";
 
-        await docRef.set(newClient);
+    const addressesRef = db.collection('destination'); // UPDATED: Collection name
+    const q = addressesRef
+        .where('street_address', '==', addressData.street_address)
+        .where('city', '==', addressData.city)
+        .where('state', '==', addressData.state)
+        .where('zip', '==', addressData.zip)
+        .where('nickname', '==', addressData.nickname);
 
-        console.log(`Successfully created client ${first_name} ${last_name} with ID: ${docRef.id}`);
-        return { client_id: docRef.id, ...newClient };
-    } catch (error) {
-        console.error("Error creating client:", error);
-        throw error;
+    const snapshot = await q.get();
+
+    if (!snapshot.empty) {
+        console.log(`Found existing destination for: ${addressData.nickname || addressData.street_address}`);
+        return snapshot.docs[0].ref;
+    } else {
+        console.log(`Creating new destination for: ${addressData.nickname || addressData.street_address}`);
+        const newAddress = await createAddress(addressData); // This function now creates a 'destination'
+        return db.collection('destination').doc(newAddress.destination_id); // UPDATED: Collection and ID
     }
 }
 
-/**
- * Creates a new volunteer document in the 'volunteers' collection.
- * @param {object} volunteerData - Object containing all volunteer information. All keys should be in snake_case.
- * @returns {Promise<object>} A promise that resolves to the newly created volunteer object, including its ID.
- * @throws {Error} Throws an error if required fields are missing or invalid.
- */
-async function createVolunteer(volunteerData) {
-    try {
-        // --- Validation ---
-        const { first_name, last_name, email, primary_phone } = volunteerData;
-        if (!first_name || !last_name) throw new Error("Missing name for volunteer");
-        if (!primary_phone) throw new Error("Missing primary phone for volunteer");
-        if (!email) throw new Error("Volunteers must have an email");
-        if (!validateEmail(email)) throw new Error("Invalid email for volunteer");
+// --- Generic CSV Loader ---
 
-        const docRef = db.collection("volunteers").doc();
-        const volunteer_id = docRef.id;
-
-        // --- Data Normalization and Defaulting ---
-        const contact_type_preference = volunteerData.contact_type_preference || 'phone';
-        const account_status = volunteerData.account_status || 'active';
-        const month_year_of_birth = volunteerData.month_year_of_birth || '';
-        const is_cell = Boolean(volunteerData.is_cell) || false;
-        const ok_to_text = is_cell ? Boolean(volunteerData.ok_to_text) : false;
-        const secondary_phone = volunteerData.secondary_phone || null;
-        const secondary_is_cell = Boolean(volunteerData.secondary_is_cell) || false;
-        const position = volunteerData.position || 'driver';
-        const training_date = volunteerData.training_date || null;
-        const orientation_date = volunteerData.orientation_date || null;
-        const volunteering_start_date = volunteerData.volunteering_start_date || null;
-        const unavailability = volunteerData.unavailability || [];
-        const vehicle = volunteerData.vehicle || null;
-        const max_rides_per_week = volunteerData.max_rides_per_week || 0;
-        const town_preference = volunteerData.town_preference || null;
-        const destination_limitations = volunteerData.destination_limitations || null;
-        const mobility_aid_type = volunteerData.mobility_aid_type || [];
-        const mileage_reimbursement = Boolean(volunteerData.mileage_reimbursement) || false;
-
-        // --- Construct Final Volunteer Object ---
-        const newVolunteer = {
-            // Personal and Contact Info
-            first_name,
-            last_name,
-            month_year_of_birth,
-            email,
-            primary_phone,
-            is_cell,
-            ok_to_text,
-            secondary_phone,
-            secondary_is_cell,
-            // Volunteer-Specific Details
-            volunteer_id,
-            position,
-            training_date,
-            orientation_date,
-            volunteering_start_date,
-            unavailability,
-            vehicle,
-            max_rides_per_week,
-            town_preference,
-            destination_limitations,
-            mobility_aid_type,
-            mileage_reimbursement,
-            // Metadata
-            contact_type_preference,
-            account_status,
-            date_created: new Date(),
-        };
-
-        await docRef.set(newVolunteer);
-
-        console.log(`Successfully created volunteer ${first_name} ${last_name} with ID: ${docRef.id}`);
-        return { volunteer_id: docRef.id, ...newVolunteer };
-    } catch (error) {
-        console.error("Error creating volunteer:", error);
-        throw error;
-    }
+function loadCSV(filePath) {
+    return new Promise((resolve, reject) => {
+        const rows = [];
+        fs.createReadStream(filePath)
+            .pipe(csv())
+            .on("data", (row) => rows.push(row))
+            .on("end", () => resolve(rows))
+            .on("error", reject);
+    });
 }
 
-/**
- * Creates a new address document in the 'addresses' collection.
- * @param {object} addressData - Object containing address information. Keys should be in snake_case.
- * @returns {Promise<object>} A promise that resolves to the new address object with its ID.
- * @throws {Error} Throws an error if required fields are missing.
- */
-async function createAddress(addressData) {
-    try {
-        // --- Validation ---
-        // Only street and city are strictly required. State and Zip can be null.
-        const { street_address, city } = addressData;
-        if (!street_address || !city) {
-            throw new Error("Missing required address fields (street_address, city)");
+// --- Migration Functions ---
+
+async function migrateClients(filePath) {
+    const rows = await loadCSV(filePath);
+    let limit = migrateClients.limit ?? rows.length;
+    let count = 0;
+    for (const row of rows) {
+        if (count++ >= limit) break;
+
+        // UPDATED: Field names to match 'clients' collection
+        const clientData = {
+            first_name: row[findKey(row, "FIRST NAME")]?.trim() || null,
+            last_name: row[findKey(row, "LAST NAME")]?.trim() || null,
+            primary_phone: row[findKey(row, "PRIMARY PHONE")]?.trim() || null,
+            email_address: row[findKey(row, "EMAIL ADDRESS")]?.trim() || null, // Renamed
+            street_address: row[findKey(row, "STREET ADDRESS")]?.trim() || null,
+            address2: row[findKey(row, "ADDRESS 2")]?.trim() || null, // Renamed
+            city: row[findKey(row, "CITY")]?.trim() || null,
+            state: row[findKey(row, "STATE")]?.trim() || null,
+            zip: row[findKey(row, "ZIP")]?.trim() || row[findKey(row, "ZIP ")]?.trim() || null,
+            client_status: row[findKey(row, "CLIENT STATUS")]?.trim() || 'active', // Renamed
+        };
+
+        try {
+            await createClient(clientData);
+        } catch (error) {
+            console.error(`Failed to migrate client row ${count}: ${error.message}`, clientData);
+        }
+    }
+    console.log(`Client migration finished. Processed ${count} rows.`);
+}
+
+async function migrateVolunteers(filePath) {
+    const rows = await loadCSV(filePath);
+    let limit = migrateVolunteers.limit ?? rows.length;
+    let count = 0;
+    for (const row of rows) {
+        if (count++ >= limit) break;
+
+        // UPDATED: Field names to match 'volunteers' collection
+        const volunteerData = {
+            first_name: row[findKey(row, "FIRST NAME")]?.trim() || null,
+            last_name: row[findKey(row, "LAST NAME")]?.trim() || null,
+            primary_phone: row[findKey(row, "PRIMARY PHONE")]?.trim() || null,
+            email_address: row[findKey(row, "EMAIL ADDRESS")]?.trim() || null, // Renamed
+            role: row[findKey(row, "VOLUNTEER POSITION")] || 'driver', // Renamed
+        };
+
+        try {
+            await createVolunteer(volunteerData);
+        } catch (error) {
+            console.error(`Failed to migrate volunteer row ${count}: ${error.message}`, volunteerData);
+        }
+    }
+    console.log(`Volunteer migration finished. Processed ${count} rows.`);
+}
+
+async function migrateCallData(filePath) {
+    const rows = await loadCSV(filePath);
+    let limit = migrateCallData.limit ?? rows.length;
+    let count = 0;
+    for (const row of rows) {
+        if (count++ >= limit) break;
+
+        const isRideRequest = row[findKey(row, 'isRideRequest')]?.toUpperCase() === 'TRUE';
+        if (!isRideRequest) {
+            console.log(`Skipping row ${count} as it's not a ride request.`);
+            continue;
         }
 
-        const docRef = db.collection("addresses").doc();
-        const address_id = docRef.id;
+        try {
+            // Step 1: Create or find the destination
+            // UPDATED: Field names to match 'destination' collection
+            const addressData = {
+                nickname: row[findKey(row, 'NAME OF DESTINATION/PRACTICE/BUILDING')] || null,
+                street_address: row[findKey(row, 'DESTINATION STREET ADDRESS')] || null,
+                address_2: row[findKey(row, 'DESTINATION ADDRESS 2')] || null, // Kept snake_case
+                city: row[findKey(row, 'CITY')] || null,
+                state: row[findKey(row, 'STATE')] || null,
+                zip: row[findKey(row, 'ZIP')] || null,
+                // 'common_purpose' field is gone
+            };
 
-        const newAddress = {
-            address_id,
-            street_address,
-            city,
-            state: addressData.state || null,
-            zip: addressData.zip || null,
-            address_2: addressData.address_2 || null,
-            nickname: addressData.nickname || null,
-            common_purpose: addressData.common_purpose || null,
-            date_created: new Date(),
-        };
+            if (!addressData.street_address || !addressData.city) {
+                console.warn(`Skipping ride in row ${count}: Missing essential address details.`);
+                continue;
+            }
+            const addressRef = await createOrFindAddress(addressData); // This now returns a ref to 'destination'
 
-        await docRef.set(newAddress);
+            // Step 2: Create the Ride document
+            const clientId = row[findKey(row, 'Client ID')];
+            if (!clientId) {
+                console.warn(`Skipping ride in row ${count}: Missing Client ID.`);
+                continue;
+            }
 
-        console.log(`Successfully created address with ID: ${docRef.id}`);
-        return { address_id: docRef.id, ...newAddress };
-    } catch (error) {
-        console.error("Error creating address:", error);
-        throw error;
-    }
-}
+            // UPDATED: Field names to match 'rides' collection
+            const rideData = {
+                clientUID: db.collection('clients').doc(clientId), // Renamed
+                destinationUID: addressRef, // Renamed
+                Date: row[findKey(row, 'DATE OF RIDE')] || null, // Renamed
+                appointmentTime: row[findKey(row, 'APPOINTMENT TIME')] || null, // Renamed
+                pickupTme: row[findKey(row, 'PICK UP TIME')] || null, // Renamed
+                estimatedDuration: parseDuration(row[findKey(row, 'ESTIMATED LENGTH OF APPOINTMENT')]), // Renamed
+                purpose: row[findKey(row, 'PURPOSE OF TRIP')] || null,
+                tripType: parseTripType(row[findKey(row, 'ROUND TRIP OR ONE WAY')]), // Renamed
+                wheelchair: parseWheelchair(row[findKey(row, 'WHEELCHAIR')]),
+                externalComment: row[findKey(row, 'COMMENTS ABOUT RIDE')] || null, // Renamed
+            };
 
-/**
- * Creates a new ride document in the 'rides' collection.
- * @param {object} rideData - Object containing ride information. Keys should be in snake_case.
- * @returns {Promise<object>} A promise that resolves to the new ride object with its ID.
- * @throws {Error} Throws an error if required fields are missing.
- */
-async function createRide(rideData) {
-    try {
-        // --- Validation ---
-        const { client_ref, date, end_location_address_ref } = rideData;
-        if (!client_ref || !date || !end_location_address_ref) {
-            throw new Error("Missing required ride fields (client_ref, date, end_location_address_ref)");
+            await createRide(rideData);
+
+        } catch (error) {
+            console.error(`Failed to migrate call data row ${count}: ${error.message}`, row);
         }
-
-        const docRef = db.collection("rides").doc();
-        const ride_id = docRef.id;
-
-        const wheelchair = Boolean(rideData.wheelchair) || false;
-        const newRide = {
-            ride_id,
-            client_ref,
-            date,
-            end_location_address_ref,
-            additional_client_1_name: rideData.additional_client_1_name || null,
-            additional_client_1_rel: rideData.additional_client_1_rel || null,
-            driver_volunteer_ref: rideData.driver_volunteer_ref || null,
-            dispatcher_uid_string: rideData.dispatcher_uid_string || null,
-            start_location_address_ref: rideData.start_location_address_ref || null,
-            appointment_time: rideData.appointment_time || null,
-            pickup_time: rideData.pickup_time || null,
-            estimated_duration: rideData.estimated_duration || null,
-            purpose: rideData.purpose || null,
-            trip_type: rideData.trip_type || 'OneWay',
-            status: rideData.status || 'Scheduled',
-            wheelchair,
-            wheelchair_type: wheelchair ? (rideData.wheelchair_type || 'Manual') : null,
-            miles_driven: rideData.miles_driven || 0,
-            volunteer_hours: rideData.volunteer_hours || 0,
-            donation_received: rideData.donation_received || 'None',
-            donation_amount: rideData.donation_amount || 0,
-            confirmation_1_date: rideData.confirmation_1_date || null,
-            confirmation_1_by: rideData.confirmation_1_by || null,
-            confirmation_2_date: rideData.confirmation_2_date || null,
-            confirmation_2_by: rideData.confirmation_2_by || null,
-            internal_comments: rideData.internal_comments || null,
-            external_comments: rideData.external_comments || null,
-            incident_report: rideData.incident_report || null,
-            date_created: new Date(),
-        };
-
-        await docRef.set(newRide);
-
-        console.log(`Successfully created ride with ID: ${docRef.id}`);
-        return { ride_id: docRef.id, ...newRide };
-    } catch (error) {
-        console.error("Error creating ride:", error);
-        throw error;
     }
+    console.log(`Call data migration finished. Processed ${count} rows.`);
 }
 
-module.exports = { createClient, createVolunteer, createAddress, createRide };
+// --- Main Execution ---
+
+(async () => {
+    // Set optional limits for testing, or comment out to process all rows.
+    migrateClients.limit = 0;
+    migrateVolunteers.limit = 0;
+    migrateCallData.limit = 15;
+
+    console.log("Starting client migration...");
+    await migrateClients("./fakeClients.csv");
+
+    console.log("\nStarting volunteer migration...");
+    await migrateVolunteers("./fakeStaff.csv");
+
+    console.log("\nStarting call data migration...");
+    await migrateCallData("./fakeCalls.csv");
+
+    console.log("\nAll migrations complete.");
+})();
