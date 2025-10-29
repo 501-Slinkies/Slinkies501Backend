@@ -225,7 +225,7 @@ async function getVolunteerData(startDate, endDate, organization) {
         volunteer.mobility_assistance ||
         volunteer.MobilityAidType ||
         volunteer.mobilityAidType ||
-        "",
+        "", 
 
       driver_availability:
         volunteer.driver_availability_by_day_and_time ||
