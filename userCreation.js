@@ -1,5 +1,5 @@
 /**
- * @fileoverview Standalone functions for creating client, volunteer, address, and ride records in Firestore.
+ * @fileoverview Standalone functions for creating client, volunteer, destination, and ride records in Firestore.
  */
 
 const { db } = require('./firebase');
@@ -16,67 +16,68 @@ function validateEmail(email) {
 
 /**
  * Creates a new client document in the 'clients' collection.
- * @param {object} clientData - Object containing all client information. All keys should be in snake_case.
+ * @param {object} clientData - Object containing all client information. All keys should match the new schema.
  * @returns {Promise<object>} A promise that resolves to the newly created client object, including its UID.
  * @throws {Error} Throws an error if required fields are missing or invalid.
  */
 async function createClient(clientData) {
     try {
-        // --- Validation ---
-        const { first_name, last_name, email, primary_phone } = clientData;
+        // --- Validation (using new field names) ---
+        const { first_name, last_name, email_address, primary_phone } = clientData;
         if (!first_name || !last_name) throw new Error("Missing name for client");
         if (!primary_phone) throw new Error("Missing primary phone for client");
-        if (email && !validateEmail(email)) throw new Error("Invalid email format for client");
-        if (!email) console.warn("Warning: Missing email for client", first_name, last_name);
+        if (email_address && !validateEmail(email_address)) throw new Error("Invalid email format for client");
+        if (!email_address) console.warn("Warning: Missing email for client", first_name, last_name);
 
-        // --- Data Normalization and Defaulting ---
-        const contact_type_preference = clientData.contact_type_preference || 'phone';
-        const account_status = clientData.account_status || 'active';
-        const month_year_of_birth = clientData.month_year_of_birth || '';
-        const is_cell = Boolean(clientData.is_cell) || false;
-        const ok_to_text = is_cell ? Boolean(clientData.ok_to_text) : false;
-        const secondary_phone = clientData.secondary_phone || null;
-        const secondary_is_cell = Boolean(clientData.secondary_is_cell) || false;
-        const street_address = clientData.street_address || '';
-        const address_2 = clientData.address_2 || '';
-        const city = clientData.city || '';
-        const state = clientData.state || '';
-        const zip = clientData.zip || '';
-        const emergency_contacts = clientData.emergency_contacts || [];
-        const mobility_aid_type = clientData.mobility_aid_type || null;
-        const impairments = clientData.impairments || [];
-        const service_animal = Boolean(clientData.service_animal) || false;
-        const comments = clientData.comments || null;
+        // --- Data Normalization and Defaulting (using new field names) ---
+        const primary_iscell = Boolean(clientData.primary_iscell) || false;
+        const secondary_iscell = Boolean(clientData.secondary_iscell) || false;
 
-        // --- Construct Final Client Object ---
+        // --- Construct Final Client Object (matching new schema) ---
         const newClient = {
             // Personal and Contact Info
             first_name,
             last_name,
-            month_year_of_birth,
-            email: email || '',
+            month_and_year_of_birth: clientData.month_and_year_of_birth || '',
+            email_address: email_address || '',
             primary_phone,
-            is_cell,
-            ok_to_text,
-            secondary_phone,
-            secondary_is_cell,
+            primary_iscell,
+            primary_allow_text: primary_iscell ? Boolean(clientData.primary_allow_text) : false,
+            secondary_phone: clientData.secondary_phone || null,
+            secondary_iscell,
+            secondary_allow_text: secondary_iscell ? Boolean(clientData.secondary_allow_text) : false,
             // Address Info
-            street_address,
-            address_2,
-            city,
-            state,
-            zip,
+            street_address: clientData.street_address || '',
+            address2: clientData.address2 || '', // Renamed
+            city: clientData.city || '',
+            state: clientData.state || '',
+            zip: clientData.zip || '',
             // Client-Specific Details
-            emergency_contacts,
-            mobility_aid_type,
-            impairments,
-            service_animal,
-            comments,
+            emergency_contact_name: clientData.emergency_contact_name || null,
+            emergency_contact_phone: clientData.emergency_contact_phone || null,
+            relationship_to_client: clientData.relationship_to_client || null,
+            mobility_assistance: clientData.mobility_assistance || null,
+            other_limitations: clientData.other_limitations || null,
+            service_animal: Boolean(clientData.service_animal) || false,
+            comments: clientData.comments || null,
             // Metadata
             client_id: null,
-            contact_type_preference,
-            account_status,
-            date_created: new Date(),
+            organization: clientData.organization || null,
+            type_of_residence: clientData.type_of_residence || null,
+            preferred_contact: clientData.preferred_contact || 'phone',
+            oxygen: Boolean(clientData.oxygen) || false,
+            allergies: clientData.allergies || null,
+            car_height_needed: clientData.car_height_needed || null,
+            service_animal_breed: clientData.service_animal_breed || null,
+            service_animal_size: clientData.service_animal_size || null,
+            service_animal_notes: clientData.service_animal_notes || null,
+            pick_up_instructions: clientData.pick_up_instructions || null,
+            live_alone: Boolean(clientData.live_alone) || false,
+            gender: clientData.gender || null,
+            how_did_they_hear_about_us: clientData.how_did_they_hear_about_us || null,
+            client_status: clientData.client_status || 'active',
+            date_enrolled: new Date(), // Using new Date() for enroll date
+            temp_date: clientData.temp_date || null,
         };
 
         const docRef = db.collection("clients").doc();
@@ -94,72 +95,74 @@ async function createClient(clientData) {
 
 /**
  * Creates a new volunteer document in the 'volunteers' collection.
- * @param {object} volunteerData - Object containing all volunteer information. All keys should be in snake_case.
+ * @param {object} volunteerData - Object containing all volunteer information. All keys should match the new schema.
  * @returns {Promise<object>} A promise that resolves to the newly created volunteer object, including its UID.
  * @throws {Error} Throws an error if required fields are missing or invalid.
  */
 async function createVolunteer(volunteerData) {
     try {
-        // --- Validation ---
-        const { first_name, last_name, email, primary_phone } = volunteerData;
+        // --- Validation (using new field names) ---
+        const { first_name, last_name, email_address, primary_phone } = volunteerData;
         if (!first_name || !last_name) throw new Error("Missing name for volunteer");
         if (!primary_phone) throw new Error("Missing primary phone for volunteer");
-        if (!email) throw new Error("Volunteers must have an email");
-        if (!validateEmail(email)) throw new Error("Invalid email for volunteer");
+        if (!email_address) throw new Error("Volunteers must have an email");
+        if (!validateEmail(email_address)) throw new Error("Invalid email for volunteer");
 
-        // --- Data Normalization and Defaulting ---
-        const contact_type_preference = volunteerData.contact_type_preference || 'phone';
-        const account_status = volunteerData.account_status || 'active';
-        const month_year_of_birth = volunteerData.month_year_of_birth || '';
-        const is_cell = Boolean(volunteerData.is_cell) || false;
-        const ok_to_text = is_cell ? Boolean(volunteerData.ok_to_text) : false;
-        const secondary_phone = volunteerData.secondary_phone || null;
+        // --- Data Normalization and Defaulting (using new field names) ---
+        const primary_is_cell = Boolean(volunteerData.primary_is_cell) || false;
         const secondary_is_cell = Boolean(volunteerData.secondary_is_cell) || false;
-        const position = volunteerData.position || 'driver';
-        const training_date = volunteerData.training_date || null;
-        const orientation_date = volunteerData.orientation_date || null;
-        const volunteering_start_date = volunteerData.volunteering_start_date || null;
-        const unavailability = volunteerData.unavailability || [];
-        const vehicle = volunteerData.vehicle || null;
-        const max_rides_per_week = volunteerData.max_rides_per_week || 0;
-        const town_preference = volunteerData.town_preference || null;
-        const destination_limitations = volunteerData.destination_limitations || null;
-        const mobility_aid_type = volunteerData.mobility_aid_type || [];
-        const mileage_reimbursement = Boolean(volunteerData.mileage_reimbursement) || false;
 
-        // --- Construct Final Volunteer Object ---
+        // --- Construct Final Volunteer Object (matching new schema) ---
         const newVolunteer = {
             // Personal and Contact Info
             first_name,
             last_name,
-            month_year_of_birth,
-            email,
+            birth_month_year: volunteerData.birth_month_year || '',
+            email_address,
             primary_phone,
-            is_cell,
-            ok_to_text,
-            secondary_phone,
+            primary_is_cell,
+            primary_text: primary_is_cell ? Boolean(volunteerData.primary_text) : false,
+            secondary_phone: volunteerData.secondary_phone || null,
             secondary_is_cell,
+            secondary_text: secondary_is_cell ? Boolean(volunteerData.secondary_text) : false,
+            // Address (from schema)
+            street_address: volunteerData.street_address || null,
+            address2: volunteerData.address2 || null,
+            city: volunteerData.city || null,
+            state: volunteerData.state || null,
             // Volunteer-Specific Details
-            volunteer_id: null,
-            position,
-            training_date,
-            orientation_date,
-            volunteering_start_date,
-            unavailability,
-            vehicle,
-            max_rides_per_week,
-            town_preference,
-            destination_limitations,
-            mobility_aid_type,
-            mileage_reimbursement,
+            volunteer_id: null, // Will be set to doc.id (string)
+            role: volunteerData.role || 'driver',
+            when_trained_by_lifespan: volunteerData.when_trained_by_lifespan || null,
+            when_oriented_position: volunteerData.when_oriented_position || null,
+            date_began_volunteering: volunteerData.date_began_volunteering || null,
+            driver_availability_by_day_and_time: volunteerData.driver_availability_by_day_and_time || null,
+            type_of_vehicle: volunteerData.type_of_vehicle || null,
+            color: volunteerData.color || null,
+            max_rides_week: volunteerData.max_rides_week || 0,
+            town_preference: volunteerData.town_preference || null,
+            destination_limitations: volunteerData.destination_limitations || null,
+            mileage_reimbursement: Boolean(volunteerData.mileage_reimbursement) || false,
             // Metadata
-            contact_type_preference,
-            account_status,
-            date_created: new Date(),
+            organization: volunteerData.organization || null,
+            contact_type_preference: volunteerData.contact_type_preference || 'phone',
+            volunteering_status: volunteerData.volunteering_status || 'active',
+            // Other fields from schema
+            emergency_contact_name: volunteerData.emergency_contact_name || null,
+            emergency_contact_phone: volunteerData.emergency_contact_phone || null,
+            emergency_contact_relationship: volunteerData.emergency_contact_relationship || null,
+            client_preference_for_drivers: volunteerData.client_preference_for_drivers || null,
+            allergens_in_car: volunteerData.allergens_in_car || null,
+            seat_height_from_ground: volunteerData.seat_height_from_ground || null,
+            how_heard_about_us: volunteerData.how_heard_about_us || null,
+            data1_fromdate: volunteerData.data1_fromdate || null,
+            data2_toDate: volunteerData.data2_toDate || null,
+            comments: volunteerData.comments || null,
+            // 'password' and 'roles' subcollection are omitted
         };
 
         const docRef = db.collection("volunteers").doc();
-        newVolunteer.volunteer_id = docRef.id;
+        newVolunteer.volunteer_id = docRef.id; // Using string doc ID
         
         await docRef.set(newVolunteer);
 
@@ -172,96 +175,101 @@ async function createVolunteer(volunteerData) {
 }
 
 /**
- * Creates a new address document in the 'addresses' collection.
- * @param {object} addressData - Object containing address information. Keys should be in snake_case.
- * @returns {Promise<object>} A promise that resolves to the new address object with its ID.
+ * Creates a new destination document in the 'destination' collection.
+ * @param {object} addressData - Object containing address information. Keys should match 'destination' schema.
+ * @returns {Promise<object>} A promise that resolves to the new destination object with its ID.
  * @throws {Error} Throws an error if required fields are missing.
  */
 async function createAddress(addressData) {
     try {
         // --- Validation ---
-        // Only street and city are strictly required. State and Zip can be null.
         const { street_address, city } = addressData;
         if (!street_address || !city) {
             throw new Error("Missing required address fields (street_address, city)");
         }
 
-        // --- Data Normalization and Defaulting ---
+        // --- Data Normalization and Defaulting (matching new schema) ---
         const newAddress = {
-            address_id: null,
+            destination_id: null,
             street_address,
             city,
             state: addressData.state || null,
             zip: addressData.zip || null,
-            address_2: addressData.address_2 || null,
+            address_2: addressData.address_2 || null, // Matches 'destination' schema
             nickname: addressData.nickname || null,
-            common_purpose: addressData.common_purpose || null,
-            date_created: new Date(),
+            organization: addressData.organization || null,
+            entered_by: addressData.entered_by || null,
+            // 'common_purpose' and 'date_created' are removed
         };
 
-        const docRef = db.collection("addresses").doc();
-        newAddress.address_id = docRef.id;
+        const docRef = db.collection("destination").doc(); // UPDATED: Collection name
+        newAddress.destination_id = docRef.id; // UPDATED: Field name
         
         await docRef.set(newAddress);
 
-        console.log(`Successfully created address with ID: ${docRef.id}`);
-        return { address_id: docRef.id, ...newAddress };
+        console.log(`Successfully created destination with ID: ${docRef.id}`);
+        return { destination_id: docRef.id, ...newAddress }; // UPDATED: Field name
     } catch (error) {
-        console.error("Error creating address:", error);
+        console.error("Error creating destination:", error); // UPDATED: Log message
         throw error;
     }
 }
 
 /**
  * Creates a new ride document in the 'rides' collection.
- * @param {object} rideData - Object containing ride information. Keys should be in snake_case.
+ * @param {object} rideData - Object containing ride information. Keys should match 'rides' schema.
  * @returns {Promise<object>} A promise that resolves to the new ride object with its ID.
  * @throws {Error} Throws an error if required fields are missing.
  */
 async function createRide(rideData) {
     try {
-        // --- Validation ---
-        const { client_ref, date, end_location_address_ref } = rideData;
-        if (!client_ref || !date || !end_location_address_ref) {
-            throw new Error("Missing required ride fields (client_ref, date, end_location_address_ref)");
+        // --- Validation (using new field names) ---
+        const { clientUID, Date, destinationUID } = rideData;
+        if (!clientUID || !Date || !destinationUID) {
+            throw new Error("Missing required ride fields (clientUID, Date, destinationUID)");
         }
 
-        // --- Data Normalization and Defaulting ---
+        // --- Data Normalization and Defaulting (matching new schema) ---
         const wheelchair = Boolean(rideData.wheelchair) || false;
         const newRide = {
             ride_id: null,
-            client_ref,
-            date,
-            end_location_address_ref,
-            additional_client_1_name: rideData.additional_client_1_name || null,
-            additional_client_1_rel: rideData.additional_client_1_rel || null,
-            driver_volunteer_ref: rideData.driver_volunteer_ref || null,
-            dispatcher_uid_string: rideData.dispatcher_uid_string || null,
-            start_location_address_ref: rideData.start_location_address_ref || null,
-            appointment_time: rideData.appointment_time || null,
-            pickup_time: rideData.pickup_time || null,
-            estimated_duration: rideData.estimated_duration || null,
+            UID: null, // Will be set to doc ID
+            organization: rideData.organization || null,
+            clientUID,
+            destinationUID,
+            Date,
+            additionalClient1_name: rideData.additionalClient1_name || null,
+            additionalClient1_rel: rideData.additionalClient1_rel || null,
+            driverUID: rideData.driverUID || null,
+            dispatcherUID: rideData.dispatcherUID || null,
+            startLocation: rideData.startLocation || null,
+            appointmentTime: rideData.appointmentTime || null,
+            appointment_type: rideData.appointment_type || null,
+            pickupTme: rideData.pickupTme || null,
+            estimatedDuration: rideData.estimatedDuration || null,
             purpose: rideData.purpose || null,
-            trip_type: rideData.trip_type || 'OneWay',
+            tripType: rideData.tripType || 'OneWay',
             status: rideData.status || 'Scheduled',
             wheelchair,
-            wheelchair_type: wheelchair ? (rideData.wheelchair_type || 'Manual') : null,
-            miles_driven: rideData.miles_driven || 0,
-            volunteer_hours: rideData.volunteer_hours || 0,
-            donation_received: rideData.donation_received || 'None',
-            donation_amount: rideData.donation_amount || 0,
-            confirmation_1_date: rideData.confirmation_1_date || null,
-            confirmation_1_by: rideData.confirmation_1_by || null,
-            confirmation_2_date: rideData.confirmation_2_date || null,
-            confirmation_2_by: rideData.confirmation_2_by || null,
-            internal_comments: rideData.internal_comments || null,
-            external_comments: rideData.external_comments || null,
-            incident_report: rideData.incident_report || null,
-            date_created: new Date(),
+            wheelchairType: wheelchair ? (rideData.wheelchairType || 'Manual') : null,
+            milesDriven: rideData.milesDriven || 0,
+            volunteerHours: rideData.volunteerHours || 0,
+            donationReceived: rideData.donationReceived || 'None',
+            donationAmount: rideData.donationAmount || 0,
+            confirmation1_Date: rideData.confirmation1_Date || null,
+            confirmation1_By: rideData.confirmation1_By || null,
+            confirmation2_Date: rideData.confirmation2_Date || null,
+            confirmation2_By: rideData.confirmation2_By || null,
+            internalComment: rideData.internalComment || null,
+            externalComment: rideData.externalComment || null,
+            incidentReport: rideData.incidentReport || null,
+            CreatedAt: new Date(),
+            UpdatedAt: new Date(),
         };
 
         const docRef = db.collection("rides").doc();
         newRide.ride_id = docRef.id;
+        newRide.UID = docRef.id; // Set 'UID' field as requested
 
         await docRef.set(newRide);
 
