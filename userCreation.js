@@ -76,7 +76,7 @@ async function createClient(clientData) {
             gender: clientData.gender || null,
             how_did_they_hear_about_us: clientData.how_did_they_hear_about_us || null,
             client_status: clientData.client_status || 'active',
-            date_enrolled: new Date(), // Using new Date() for enroll date
+            date_enrolled: new Date().toISOString(), // UPDATED: Changed to string
             temp_date: clientData.temp_date || null,
         };
 
@@ -263,8 +263,8 @@ async function createRide(rideData) {
             internalComment: rideData.internalComment || null,
             externalComment: rideData.externalComment || null,
             incidentReport: rideData.incidentReport || null,
-            CreatedAt: new Date(),
-            UpdatedAt: new Date(),
+            CreatedAt: new Date().toISOString(), // UPDATED: Changed to string
+            UpdatedAt: new Date().toISOString(), // UPDATED: Changed to string
         };
 
         const docRef = db.collection("rides").doc();
