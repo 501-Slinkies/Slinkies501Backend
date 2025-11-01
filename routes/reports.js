@@ -77,31 +77,67 @@ router.post("/save", async (req, res) => {
 });
 
 
-
 /**
- * ✅ GET /api/reports/saved/:user_id
- * (Not required by FF unless you want to retrieve saved user report filters)
+ * ✅ GET /api/reports/:user_id
+ * Reads the last saved report preferences and returns report data
  */
-router.get("/saved/:user_id", async (req, res) => {
+router.get("/:user_id", async (req, res) => {
   try {
     const { user_id } = req.params;
+    const { start, end, organization } = req.query;
 
+    if (!user_id) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing user_id"
+      });
+    }
+
+    // Get last saved selection for this user
     const snapshot = await db
       .collection("savedReports")
       .where("user_id", "==", user_id)
+      .orderBy("timestamp", "desc")
+      .limit(1)
       .get();
 
-    const reports = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    }));
+    if (snapshot.empty) {
+      return res.json({
+        success: true,
+        reports: [],
+        message: "No saved report filters found"
+      });
+    }
 
-    res.json({ success: true, reports });
+    const saved = snapshot.docs[0].data();
+    const selectedParams = saved.selectedParams; // e.g. ["first_name", "last_name"]
+
+    // If FF passed dates, use them, otherwise default
+    const startDate = start ? new Date(start) : new Date("2000-01-01");
+    const endDate   = end   ? new Date(end)   : new Date();
+
+    // Run the report using stored params
+    const reportsData = await getReportData(selectedParams, startDate, endDate, organization);
+
+    // Convert keys to snake_case before sending
+    const snakeCaseResponse = _.mapKeys(reportsData, (v, k) => _.snakeCase(k));
+
+    return res.json({
+      success: true,
+      filters_used: selectedParams,
+      reports: snakeCaseResponse,
+    });
+
   } catch (error) {
-    console.error("Error fetching saved reports:", error);
-    res.status(500).json({ success: false, message: "Server error", error: error.message });
+    console.error("Error generating user report:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error generating report",
+      error: error.message
+    });
   }
 });
+
 
 
 // ===========================================================================
