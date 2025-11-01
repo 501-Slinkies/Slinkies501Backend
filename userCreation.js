@@ -3,7 +3,11 @@
  */
 
 const { db } = require('./firebase');
-const { encrypt } = require('./utils/encryption');
+const crypto = require('crypto');
+
+function sha256(str) {
+  return crypto.createHash('sha256').update(str).digest('hex');
+}
 
 /**
  * Validates if a string is a properly formatted email address.

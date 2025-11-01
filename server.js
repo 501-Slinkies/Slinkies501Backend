@@ -46,12 +46,12 @@ app.use(bodyParser.json());
 // Login Endpoint
 // ================================
 app.post('/login', async (req, res) => {
-  const { email, password, role } = req.body;
-  if (!email || !password || !role) {
-    return res.status(400).send({ message: 'Email, password, and role are required' });
+  const { username, password } = req.body;
+  if (!username || !password) {
+    return res.status(400).send({ message: 'Username and password are required' });
   }
 
-  const result = await applicationLayer.loginUser(email, password, role);
+  const result = await applicationLayer.loginUser(username, password);
   if (result.success) {
     res.status(200).send(result);
   } else {
