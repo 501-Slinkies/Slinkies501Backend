@@ -4,16 +4,16 @@
 const dataAccess = require('./DataAccessLayer');
 const jwt = require('jsonwebtoken');
 
-async function loginUser(email, password, role) {
-  const user = await dataAccess.login(email, password, role);
+async function loginUser(username, password) {
+  const user = await dataAccess.login(username, password);
   if (user) {
     // In a real application, you would generate a JWT token here
     // and send it back to the user for session management.
-    console.log('Login successful for user:', user.email);
-    return { success: true, user: { email: user.email, role: user.role } };
+    console.log('Login successful for user:', user.email_address);
+    return { success: true, user: { email: user.email_address, role: user.role } };
   } else {
     console.log('Login failed');
-    return { success: false, message: 'Invalid credentials or role' };
+    return { success: false, message: 'Invalid credentials' };
   }
 }
 
