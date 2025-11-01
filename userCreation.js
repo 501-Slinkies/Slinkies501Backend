@@ -3,7 +3,7 @@
  */
 
 const { db } = require('./firebase');
-const crypto = require('crypto');
+const { encrypt } = require('./utils/encryption');
 
 /**
  * Validates if a string is a properly formatted email address.
@@ -14,22 +14,6 @@ function validateEmail(email) {
     // A simple regex for email validation.
     return /\S+@\S+\.\S+/.test(email);
 }
-
-/**
- * Hashes a password with a salt using SHA-256.
- * @param {string} password The plain-text password.
- * @param {string} salt The salt string.
- * @returns {string} The SHA-256 hash as a hex string, or "" if no password.
- */
-function hashPassword(password, salt) {
-    if (!password) return "";
-    // A simple salt-and-hash.
-    // For production, consider crypto.pbkdf2Sync for better security (key stretching).
-    return crypto.createHash('sha256')
-                 .update(password + salt) // Simple concatenation
-                 .digest('hex');
-}
-
 
 /**
  * Creates a new client document in the 'clients' collection.
@@ -127,7 +111,7 @@ async function createVolunteer(volunteerData) {
         const primary_is_cell = Boolean(volunteerData.primary_is_cell) || false;
         const secondary_is_cell = Boolean(volunteerData.secondary_is_cell) || false;
         
-        const passwordHash = hashPassword(volunteerData.password, salt); // Hash the password
+        const passwordHash = encrypt(volunteerData.password);
 
         // --- Construct Final Volunteer Object (matching new schema) ---
         const newVolunteer = {
