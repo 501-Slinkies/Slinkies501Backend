@@ -1,10 +1,10 @@
 const { getFirestore } = require("firebase-admin/firestore");
-const bcrypt = require("bcrypt");
+const crypto = require("crypto");
 
-async function login(email, password, role) {
+async function login(username, password) {
   const db = getFirestore();
-  const usersRef = db.collection("users");
-  const snapshot = await usersRef.where("email", "==", email).get();
+  const volunteersRef = db.collection("volunteers");
+  const snapshot = await volunteersRef.where("email_address", "==", username).get();
 
   if (snapshot.empty) {
     console.log("No matching documents.");
@@ -14,12 +14,13 @@ async function login(email, password, role) {
   let user = null;
   for (const doc of snapshot.docs) {
     const userData = doc.data();
-    if (userData.role === role) {
-      const passwordMatch = await bcrypt.compare(password, userData.password);
-      if (passwordMatch) {
-        user = { id: doc.id, ...userData };
-        break;
-      }
+    // Hash the provided password using sha256
+    //const hashedPassword = crypto.createHash('sha256').update(password).digest('hex');
+    
+    // Compare the hashed password with the stored password
+    if (userData.password === password) {
+      user = { id: doc.id, ...userData };
+      break;
     }
   }
 
