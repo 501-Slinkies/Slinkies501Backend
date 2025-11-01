@@ -220,8 +220,8 @@ async function migrateCallData(filePath) {
 
 (async () => {
     // Set optional limits for testing, or comment out to process all rows.
-    migrateClients.limit = 0;
-    migrateVolunteers.limit = 0;
+    migrateClients.limit = 5;
+    migrateVolunteers.limit = 5;
     migrateCallData.limit = 15;
 
     console.log("Starting client migration...");
