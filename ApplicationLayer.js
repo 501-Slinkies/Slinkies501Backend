@@ -10,7 +10,7 @@ async function loginUser(username, password) {
     // In a real application, you would generate a JWT token here
     // and send it back to the user for session management.
     console.log('Login successful for user:', user.email_address);
-    return { success: true, user: { email: user.email_address, role: user.role } };
+    return { success: true, user: { email: user.email_address, roles: user.roles || [] } };
   } else {
     console.log('Login failed');
     return { success: false, message: 'Invalid credentials' };
