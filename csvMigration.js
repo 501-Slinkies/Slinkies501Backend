@@ -143,7 +143,7 @@ async function migrateVolunteers(filePath) {
             last_name: row[findKey(row, "LAST NAME")]?.trim() || "",
             primary_phone: row[findKey(row, "PRIMARY PHONE")]?.trim() || "",
             email_address: row[findKey(row, "EMAIL ADDRESS")]?.trim() || "", 
-            role: row[findKey(row, "VOLUNTEER POSITION")] || 'driver', 
+            roles: row[findKey(row, "VOLUNTEER POSITION")] || 'driver', 
             password: row[findKey(row, "PASSWORD")]?.trim() || "defaultPassword", // Default password if none provided
         };
 
