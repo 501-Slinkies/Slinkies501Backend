@@ -501,7 +501,7 @@ app.get('/api/drivers/:driverID/rides', async (req, res) => {
 
 // Endpoint to match drivers for a specific ride
 // This endpoint takes a ride document ID and returns available/unavailable drivers
-// based on their availability and the ride's timeframe (PickupTime, AppointmentTime, EstimatedDuration, TripType)
+// based on their availability and the ride's timeframe (Date, pickupTme, appointmentTime, estimatedDuration, tripType)
 app.get('/api/rides/:rideId/match-drivers', async (req, res) => {
   try {
     const { rideId } = req.params;
