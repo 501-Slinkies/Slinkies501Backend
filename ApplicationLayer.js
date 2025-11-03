@@ -901,6 +901,329 @@ async function updateRideByUID(uid, updateData) {
   }
 }
 
+// Organization CRUD functions
+async function createOrganization(orgData, authToken) {
+  try {
+    // Optional: Verify the JWT token if authToken is provided
+    if (authToken) {
+      const tokenVerification = verifyToken(authToken);
+      if (!tokenVerification.success) {
+        return { success: false, message: 'Authentication failed' };
+      }
+    }
+
+    // Define required fields based on schema
+    const requiredFields = ['name', 'org_id'];
+    const missingFields = requiredFields.filter(field => !orgData[field]);
+    if (missingFields.length > 0) {
+      return {
+        success: false,
+        message: `Missing required fields: ${missingFields.join(', ')}`
+      };
+    }
+
+    // Define all allowed fields from schema
+    const allowedFields = [
+      'name',
+      'org_id',
+      'address',
+      'email',
+      'short_name',
+      'phone_number',
+      'lisence_number',
+      'website',
+      'creation_date',
+      'address2',
+      'city',
+      'state',
+      'zip',
+      'pc_name',
+      'pc_phone_number',
+      'pc_email',
+      'pc_address',
+      'pc_address2',
+      'pc_city',
+      'pc_state',
+      'pc_zip',
+      'sc_name',
+      'sc_phone_number',
+      'sc_email',
+      'sc_address',
+      'sc_address2',
+      'sc_city',
+      'sc_state',
+      'sc_zip',
+      'sys_admin_phone_number',
+      'sys_admin_user_id',
+      'sys_admin_security_level'
+    ];
+
+    // Filter to only include allowed fields
+    const filteredOrgData = {};
+    for (const field of allowedFields) {
+      if (orgData[field] !== undefined) {
+        filteredOrgData[field] = orgData[field];
+      }
+    }
+
+    const result = await dataAccess.createOrganization(filteredOrgData);
+
+    if (result.success) {
+      return {
+        success: true,
+        message: result.message,
+        data: {
+          orgId: result.orgId,
+          organizationId: result.organizationId
+        }
+      };
+    } else {
+      return {
+        success: false,
+        message: result.error || 'Failed to create organization'
+      };
+    }
+  } catch (error) {
+    console.error('Error in createOrganization:', error);
+    return {
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    };
+  }
+}
+
+async function getOrganization(orgId, authToken) {
+  try {
+    // Optional: Verify the JWT token if authToken is provided
+    if (authToken) {
+      const tokenVerification = verifyToken(authToken);
+      if (!tokenVerification.success) {
+        return { success: false, message: 'Authentication failed' };
+      }
+    }
+
+    // Try to get by document ID first, then by org_id
+    let result = await dataAccess.getOrganizationById(orgId);
+    
+    if (!result.success) {
+      // Try by org_id instead
+      result = await dataAccess.getOrganizationByOrgId(orgId);
+    }
+
+    if (result.success) {
+      return {
+        success: true,
+        organization: result.organization
+      };
+    } else {
+      return {
+        success: false,
+        message: result.error || 'Organization not found'
+      };
+    }
+  } catch (error) {
+    console.error('Error in getOrganization:', error);
+    return {
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    };
+  }
+}
+
+async function getAllOrganizations(authToken) {
+  try {
+    // Optional: Verify the JWT token if authToken is provided
+    if (authToken) {
+      const tokenVerification = verifyToken(authToken);
+      if (!tokenVerification.success) {
+        return { success: false, message: 'Authentication failed' };
+      }
+    }
+
+    const result = await dataAccess.getAllOrganizations();
+
+    if (result.success) {
+      return {
+        success: true,
+        organizations: result.organizations,
+        count: result.organizations.length
+      };
+    } else {
+      return {
+        success: false,
+        message: result.error || 'Failed to fetch organizations'
+      };
+    }
+  } catch (error) {
+    console.error('Error in getAllOrganizations:', error);
+    return {
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    };
+  }
+}
+
+async function updateOrganization(orgId, updateData, authToken) {
+  try {
+    // Optional: Verify the JWT token if authToken is provided
+    if (authToken) {
+      const tokenVerification = verifyToken(authToken);
+      if (!tokenVerification.success) {
+        return { success: false, message: 'Authentication failed' };
+      }
+    }
+
+    // Define all allowed fields from schema
+    const allowedFields = [
+      'name',
+      'org_id',
+      'address',
+      'email',
+      'short_name',
+      'phone_number',
+      'lisence_number',
+      'website',
+      'creation_date',
+      'address2',
+      'city',
+      'state',
+      'zip',
+      'pc_name',
+      'pc_phone_number',
+      'pc_email',
+      'pc_address',
+      'pc_address2',
+      'pc_city',
+      'pc_state',
+      'pc_zip',
+      'sc_name',
+      'sc_phone_number',
+      'sc_email',
+      'sc_address',
+      'sc_address2',
+      'sc_city',
+      'sc_state',
+      'sc_zip',
+      'sys_admin_phone_number',
+      'sys_admin_user_id',
+      'sys_admin_security_level'
+    ];
+
+    // Filter to only include allowed fields
+    const filteredUpdateData = {};
+    for (const field of allowedFields) {
+      if (updateData[field] !== undefined) {
+        filteredUpdateData[field] = updateData[field];
+      }
+    }
+
+    if (Object.keys(filteredUpdateData).length === 0) {
+      return {
+        success: false,
+        message: 'No valid fields to update'
+      };
+    }
+
+    // Try to get by document ID first, then by org_id
+    let orgResult = await dataAccess.getOrganizationById(orgId);
+    
+    if (!orgResult.success) {
+      // Try by org_id instead
+      orgResult = await dataAccess.getOrganizationByOrgId(orgId);
+      if (orgResult.success) {
+        orgId = orgResult.organization.id; // Use the document ID for update
+      }
+    }
+
+    if (!orgResult.success) {
+      return {
+        success: false,
+        message: 'Organization not found'
+      };
+    }
+
+    const result = await dataAccess.updateOrganization(orgId, filteredUpdateData);
+
+    if (result.success) {
+      // Get the updated organization
+      const updatedOrg = await dataAccess.getOrganizationById(orgId);
+      return {
+        success: true,
+        message: result.message,
+        organization: updatedOrg.success ? updatedOrg.organization : null
+      };
+    } else {
+      return {
+        success: false,
+        message: result.error || 'Failed to update organization'
+      };
+    }
+  } catch (error) {
+    console.error('Error in updateOrganization:', error);
+    return {
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    };
+  }
+}
+
+async function deleteOrganization(orgId, authToken) {
+  try {
+    // Optional: Verify the JWT token if authToken is provided
+    if (authToken) {
+      const tokenVerification = verifyToken(authToken);
+      if (!tokenVerification.success) {
+        return { success: false, message: 'Authentication failed' };
+      }
+    }
+
+    // Try to get by document ID first, then by org_id
+    let orgResult = await dataAccess.getOrganizationById(orgId);
+    
+    if (!orgResult.success) {
+      // Try by org_id instead
+      orgResult = await dataAccess.getOrganizationByOrgId(orgId);
+      if (orgResult.success) {
+        orgId = orgResult.organization.id; // Use the document ID for deletion
+      }
+    }
+
+    if (!orgResult.success) {
+      return {
+        success: false,
+        message: 'Organization not found'
+      };
+    }
+
+    const deletedOrg = orgResult.organization;
+    const result = await dataAccess.deleteOrganization(orgId);
+
+    if (result.success) {
+      return {
+        success: true,
+        message: result.message,
+        deletedOrganization: deletedOrg
+      };
+    } else {
+      return {
+        success: false,
+        message: result.error || 'Failed to delete organization'
+      };
+    }
+  } catch (error) {
+    console.error('Error in deleteOrganization:', error);
+    return {
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    };
+  }
+}
+
 module.exports = { 
   loginUser, 
   createRoleWithPermissions, 
@@ -918,5 +1241,10 @@ module.exports = {
   calculateRideTimeframe,
   isVolunteerAvailableForTimeframe,
   convertFirestoreTimestamp,
-  getRidesByTimeframe
+  getRidesByTimeframe,
+  createOrganization,
+  getOrganization,
+  getAllOrganizations,
+  updateOrganization,
+  deleteOrganization
 };
