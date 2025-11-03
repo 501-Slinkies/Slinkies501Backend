@@ -66,6 +66,8 @@ async function createOrFindAddress(addressData) {
     // Ensure defaults are handled before querying
     addressData.state = addressData.state || "NY";
     addressData.zip = addressData.zip || "00000";
+    // Add town if not present (use city as fallback)
+    addressData.town = addressData.town || addressData.city || "";
 
     const addressesRef = db.collection('destination');
     const q = addressesRef
@@ -137,7 +139,7 @@ async function migrateClients(filePath) {
             mobility_assistance: row[findKey(row, "MOBILITY ASSISTANCE")]?.trim() || '',
             other_limitations: row[findKey(row, "OTHER LIMITATIONS")]?.trim() || '',
             car_height_needed: row[findKey(row, "CAR HEIGHT NEEDED")]?.trim() || '',
-            service_animal: row[findKey(row, "SERVICE ANIMAL")]?.trim().toUpperCase() === 'Y',
+            service_animal: row[findKey(row, "SERVICE ANIMAL")]?.trim().toUpperCase() === 'N',
             service_animal_notes: row[findKey(row, "SERVICE ANIMAL NOTES")]?.trim() || '',
             pick_up_instructions: row[findKey(row, "PICK UP INSTRUCTIONS")]?.trim() || '',
             live_alone: row[findKey(row, "LIVE ALONE")]?.trim().toUpperCase() === 'Y',
@@ -240,6 +242,7 @@ async function migrateCallData(filePath) {
                 city: row[findKey(row, 'CITY')] || "",
                 state: row[findKey(row, 'STATE')] || "",
                 zip: row[findKey(row, 'ZIP')] || "",
+                town: row[findKey(row, 'TOWN')] || row[findKey(row, 'CITY')] || "",
             };
 
             if (!addressData.street_address || !addressData.city) {

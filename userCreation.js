@@ -194,13 +194,14 @@ async function createAddress(addressData) {
         // --- Data Normalization and Defaulting (matching new schema) ---
         const newAddress = {
             destination_id: "", 
+            organization: addressData.organization || "", 
+            nickname: addressData.nickname || "", 
             street_address,
+            address_2: addressData.address_2 || "", 
             city,
             state: addressData.state || "", 
             zip: addressData.zip || "", 
-            address_2: addressData.address_2 || "", 
-            nickname: addressData.nickname || "", 
-            organization: addressData.organization || "", 
+            town: addressData.town || city || "",
             entered_by: addressData.entered_by || "System",
             date_created: new Date().toISOString(),
         };
