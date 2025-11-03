@@ -520,6 +520,210 @@ async function getClientByReference(clientRef) {
   }
 }
 
+// Organization CRUD functions
+async function createOrganization(orgData) {
+  const db = getFirestore();
+  try {
+    console.log("Creating organization with data:", JSON.stringify(orgData, null, 2));
+    
+    // Check if organization with same org_id already exists
+    if (orgData.org_id) {
+      const existingOrgQuery = await db.collection("Organizations")
+        .where("org_id", "==", orgData.org_id)
+        .get();
+      
+      if (!existingOrgQuery.empty) {
+        console.log("Organization with org_id already exists:", orgData.org_id);
+        return { success: false, error: "Organization with this org_id already exists" };
+      }
+    }
+
+    // Check if organization with same email already exists
+    if (orgData.email) {
+      const existingEmailQuery = await db.collection("Organizations")
+        .where("email", "==", orgData.email)
+        .get();
+      
+      if (!existingEmailQuery.empty) {
+        console.log("Organization with email already exists:", orgData.email);
+        return { success: false, error: "Organization with this email already exists" };
+      }
+    }
+
+    // Set creation_date if not provided
+    if (!orgData.creation_date) {
+      orgData.creation_date = new Date();
+    } else if (typeof orgData.creation_date === 'string') {
+      orgData.creation_date = new Date(orgData.creation_date);
+    }
+
+    // Create the organization document
+    const orgRef = db.collection("Organizations").doc();
+    console.log("About to create document with ID:", orgRef.id);
+    
+    await orgRef.set(orgData);
+    console.log("Organization document created successfully with ID:", orgRef.id);
+
+    return { 
+      success: true, 
+      orgId: orgRef.id,
+      organizationId: orgData.org_id,
+      message: "Organization created successfully"
+    };
+  } catch (error) {
+    console.error("Error creating organization:", error);
+    console.error("Error stack:", error.stack);
+    return { success: false, error: error.message };
+  }
+}
+
+async function getOrganizationById(orgId) {
+  const db = getFirestore();
+  try {
+    const doc = await db.collection("Organizations").doc(orgId).get();
+    
+    if (!doc.exists) {
+      return { success: false, error: "Organization not found" };
+    }
+
+    return { 
+      success: true, 
+      organization: { id: doc.id, ...doc.data() }
+    };
+  } catch (error) {
+    console.error("Error fetching organization by ID:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+async function getOrganizationByOrgId(orgId) {
+  const db = getFirestore();
+  try {
+    const snapshot = await db.collection("Organizations")
+      .where("org_id", "==", orgId)
+      .get();
+    
+    if (snapshot.empty) {
+      return { success: false, error: "Organization not found" };
+    }
+
+    const doc = snapshot.docs[0];
+    return { 
+      success: true, 
+      organization: { id: doc.id, ...doc.data() }
+    };
+  } catch (error) {
+    console.error("Error fetching organization by org_id:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+async function getAllOrganizations() {
+  const db = getFirestore();
+  try {
+    const snapshot = await db.collection("Organizations").get();
+    
+    const organizations = [];
+    snapshot.forEach(doc => {
+      organizations.push({
+        id: doc.id,
+        ...doc.data()
+      });
+    });
+    
+    return { success: true, organizations: organizations };
+  } catch (error) {
+    console.error("Error fetching all organizations:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+async function updateOrganization(orgId, updateData) {
+  const db = getFirestore();
+  try {
+    // Check if organization exists
+    const orgDoc = await db.collection("Organizations").doc(orgId).get();
+    if (!orgDoc.exists) {
+      return { success: false, error: "Organization not found" };
+    }
+
+    const currentData = orgDoc.data();
+
+    // If org_id is being changed, check it's not already taken by another organization
+    if (updateData.org_id && updateData.org_id !== currentData.org_id) {
+      const existingOrgQuery = await db.collection("Organizations")
+        .where("org_id", "==", updateData.org_id)
+        .get();
+      
+      if (!existingOrgQuery.empty) {
+        // Make sure it's not the same organization
+        const existingDoc = existingOrgQuery.docs[0];
+        if (existingDoc.id !== orgId) {
+          return { success: false, error: "Organization ID already in use by another organization" };
+        }
+      }
+    }
+
+    // If email is being changed, check it's not already taken by another organization
+    if (updateData.email && updateData.email !== currentData.email) {
+      const existingEmailQuery = await db.collection("Organizations")
+        .where("email", "==", updateData.email)
+        .get();
+      
+      if (!existingEmailQuery.empty) {
+        // Make sure it's not the same organization
+        const existingDoc = existingEmailQuery.docs[0];
+        if (existingDoc.id !== orgId) {
+          return { success: false, error: "Email address already in use by another organization" };
+        }
+      }
+    }
+
+    // Convert creation_date string to Date if needed (but don't update it if it's not in updateData)
+    if (updateData.creation_date && typeof updateData.creation_date === 'string') {
+      updateData.creation_date = new Date(updateData.creation_date);
+    }
+
+    // Update the organization document
+    await db.collection("Organizations").doc(orgId).update(updateData);
+
+    return { 
+      success: true, 
+      orgId: orgId,
+      message: "Organization updated successfully"
+    };
+  } catch (error) {
+    console.error("Error updating organization:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+async function deleteOrganization(orgId) {
+  const db = getFirestore();
+  try {
+    // Check if organization exists
+    const orgDoc = await db.collection("Organizations").doc(orgId).get();
+    if (!orgDoc.exists) {
+      return { success: false, error: "Organization not found" };
+    }
+
+    const orgData = orgDoc.data();
+
+    // Delete the organization document
+    await db.collection("Organizations").doc(orgId).delete();
+
+    return { 
+      success: true, 
+      orgId: orgId,
+      organizationId: orgData.org_id,
+      message: "Organization deleted successfully"
+    };
+  } catch (error) {
+    console.error("Error deleting organization:", error);
+    return { success: false, error: error.message };
+  }
+}
+
 module.exports = { 
   login, 
   createRole, 
@@ -538,5 +742,11 @@ module.exports = {
   getUserByUserID,
   updateUser,
   deleteUser,
-  fetchRidesInRange
+  fetchRidesInRange,
+  createOrganization,
+  getOrganizationById,
+  getOrganizationByOrgId,
+  getAllOrganizations,
+  updateOrganization,
+  deleteOrganization
 };

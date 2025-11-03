@@ -419,6 +419,424 @@ app.delete('/api/users/:userID', async (req, res) => {
   }
 });
 
+// ================================
+// Organization Endpoints
+// ================================
+
+// Create organization endpoint
+app.post('/api/organizations', async (req, res) => {
+  try {
+    const auditLogger = require('./AuditLogger');
+    const { getClientIp, getUserAgent } = require('./middleware/securityMiddleware');
+    
+    // Extract authentication token if provided (optional - for admin organization creation)
+    let authToken = null;
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      authToken = authHeader.substring(7);
+    }
+
+    // Extract organization data from request body
+    const orgData = req.body;
+    console.log('POST /api/organizations - Received organization data:', JSON.stringify(orgData, null, 2));
+
+    // Create the organization
+    const result = await applicationLayer.createOrganization(orgData, authToken);
+    console.log('POST /api/organizations - Result:', JSON.stringify(result, null, 2));
+
+    // Log the organization creation attempt
+    const ipAddress = getClientIp ? getClientIp(req) : req.ip;
+    const userAgent = getUserAgent ? getUserAgent(req) : req.get('user-agent');
+    
+    if (result.success) {
+      // Log successful organization creation
+      await auditLogger.logAccess({
+        userId: authToken ? 'authenticated' : 'unknown',
+        userEmail: 'unknown',
+        userRole: 'unknown',
+        organizationId: result.data?.organizationId || 'N/A',
+        action: 'CREATE',
+        resourceType: 'organization',
+        resourceId: result.data?.orgId || 'N/A',
+        ipAddress: ipAddress,
+        userAgent: userAgent,
+        success: true
+      });
+
+      res.status(201).send({
+        success: true,
+        message: result.message,
+        data: result.data
+      });
+    } else {
+      // Log failed organization creation attempt
+      await auditLogger.logAccess({
+        userId: 'unknown',
+        userEmail: 'unknown',
+        userRole: 'unknown',
+        organizationId: 'N/A',
+        action: 'CREATE',
+        resourceType: 'organization',
+        resourceId: 'N/A',
+        ipAddress: ipAddress,
+        userAgent: userAgent,
+        success: false,
+        failureReason: result.message
+      });
+
+      // Determine appropriate status code
+      let statusCode = 400;
+      if (result.message && result.message.includes('already exists')) {
+        statusCode = 409; // Conflict
+      } else if (result.message && result.message.includes('authentication')) {
+        statusCode = 401; // Unauthorized
+      }
+
+      res.status(statusCode).send({
+        success: false,
+        message: result.message,
+        errors: result.errors
+      });
+    }
+  } catch (error) {
+    console.error('Error in /api/organizations endpoint:', error);
+    res.status(500).send({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+});
+
+// Get organization by ID endpoint
+app.get('/api/organizations/:orgId', async (req, res) => {
+  try {
+    const auditLogger = require('./AuditLogger');
+    const { getClientIp, getUserAgent } = require('./middleware/securityMiddleware');
+    
+    // Extract the orgId from URL parameters
+    const { orgId } = req.params;
+    
+    // Extract authentication token if provided (optional)
+    let authToken = null;
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      authToken = authHeader.substring(7);
+    }
+
+    // Get the organization
+    const result = await applicationLayer.getOrganization(orgId, authToken);
+
+    // Log the access attempt
+    const ipAddress = getClientIp ? getClientIp(req) : req.ip;
+    const userAgent = getUserAgent ? getUserAgent(req) : req.get('user-agent');
+    
+    if (result.success) {
+      // Log successful organization access
+      await auditLogger.logAccess({
+        userId: authToken ? 'authenticated' : 'unknown',
+        userEmail: 'unknown',
+        userRole: 'unknown',
+        organizationId: result.organization?.org_id || 'N/A',
+        action: 'READ',
+        resourceType: 'organization',
+        resourceId: result.organization?.id || orgId,
+        ipAddress: ipAddress,
+        userAgent: userAgent,
+        success: true
+      });
+
+      res.status(200).send({
+        success: true,
+        organization: result.organization
+      });
+    } else {
+      // Log failed access attempt
+      await auditLogger.logAccess({
+        userId: 'unknown',
+        userEmail: 'unknown',
+        userRole: 'unknown',
+        organizationId: 'N/A',
+        action: 'READ',
+        resourceType: 'organization',
+        resourceId: orgId,
+        ipAddress: ipAddress,
+        userAgent: userAgent,
+        success: false,
+        failureReason: result.message
+      });
+
+      // Determine appropriate status code
+      let statusCode = 400;
+      if (result.message && result.message.includes('not found')) {
+        statusCode = 404; // Not Found
+      } else if (result.message && result.message.includes('authentication')) {
+        statusCode = 401; // Unauthorized
+      }
+
+      res.status(statusCode).send({
+        success: false,
+        message: result.message
+      });
+    }
+  } catch (error) {
+    console.error('Error in GET /api/organizations/:orgId endpoint:', error);
+    res.status(500).send({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+});
+
+// Get all organizations endpoint
+app.get('/api/organizations', async (req, res) => {
+  try {
+    const auditLogger = require('./AuditLogger');
+    const { getClientIp, getUserAgent } = require('./middleware/securityMiddleware');
+    
+    // Extract authentication token if provided (optional)
+    let authToken = null;
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      authToken = authHeader.substring(7);
+    }
+
+    // Get all organizations
+    const result = await applicationLayer.getAllOrganizations(authToken);
+
+    // Log the access attempt
+    const ipAddress = getClientIp ? getClientIp(req) : req.ip;
+    const userAgent = getUserAgent ? getUserAgent(req) : req.get('user-agent');
+    
+    if (result.success) {
+      // Log successful organizations access
+      await auditLogger.logAccess({
+        userId: authToken ? 'authenticated' : 'unknown',
+        userEmail: 'unknown',
+        userRole: 'unknown',
+        organizationId: 'all',
+        action: 'READ',
+        resourceType: 'organizations',
+        resourceId: 'all',
+        ipAddress: ipAddress,
+        userAgent: userAgent,
+        success: true
+      });
+
+      res.status(200).send({
+        success: true,
+        organizations: result.organizations,
+        count: result.count
+      });
+    } else {
+      // Log failed access attempt
+      await auditLogger.logAccess({
+        userId: 'unknown',
+        userEmail: 'unknown',
+        userRole: 'unknown',
+        organizationId: 'N/A',
+        action: 'READ',
+        resourceType: 'organizations',
+        resourceId: 'all',
+        ipAddress: ipAddress,
+        userAgent: userAgent,
+        success: false,
+        failureReason: result.message
+      });
+
+      // Determine appropriate status code
+      let statusCode = 400;
+      if (result.message && result.message.includes('authentication')) {
+        statusCode = 401; // Unauthorized
+      }
+
+      res.status(statusCode).send({
+        success: false,
+        message: result.message
+      });
+    }
+  } catch (error) {
+    console.error('Error in GET /api/organizations endpoint:', error);
+    res.status(500).send({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+});
+
+// Update organization endpoint
+app.put('/api/organizations/:orgId', async (req, res) => {
+  try {
+    const auditLogger = require('./AuditLogger');
+    const { getClientIp, getUserAgent } = require('./middleware/securityMiddleware');
+    
+    // Extract the orgId from URL parameters
+    const { orgId } = req.params;
+    
+    // Extract authentication token if provided (optional for now, required in production)
+    let authToken = null;
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      authToken = authHeader.substring(7);
+    }
+
+    // Extract update data from request body
+    const updateData = req.body;
+
+    // Update the organization
+    const result = await applicationLayer.updateOrganization(orgId, updateData, authToken);
+
+    // Log the update attempt
+    const ipAddress = getClientIp ? getClientIp(req) : req.ip;
+    const userAgent = getUserAgent ? getUserAgent(req) : req.get('user-agent');
+    
+    if (result.success) {
+      // Log successful organization update
+      await auditLogger.logAccess({
+        userId: authToken ? 'authenticated' : 'unknown',
+        userEmail: 'unknown',
+        userRole: 'unknown',
+        organizationId: result.organization?.org_id || 'N/A',
+        action: 'UPDATE',
+        resourceType: 'organization',
+        resourceId: result.organization?.id || orgId,
+        ipAddress: ipAddress,
+        userAgent: userAgent,
+        success: true
+      });
+
+      res.status(200).send({
+        success: true,
+        message: result.message,
+        organization: result.organization
+      });
+    } else {
+      // Log failed update attempt
+      await auditLogger.logAccess({
+        userId: 'unknown',
+        userEmail: 'unknown',
+        userRole: 'unknown',
+        organizationId: 'N/A',
+        action: 'UPDATE',
+        resourceType: 'organization',
+        resourceId: orgId,
+        ipAddress: ipAddress,
+        userAgent: userAgent,
+        success: false,
+        failureReason: result.message
+      });
+
+      // Determine appropriate status code
+      let statusCode = 400;
+      if (result.message && result.message.includes('not found')) {
+        statusCode = 404; // Not Found
+      } else if (result.message && result.message.includes('authentication')) {
+        statusCode = 401; // Unauthorized
+      } else if (result.message && result.message.includes('already in use')) {
+        statusCode = 409; // Conflict
+      }
+
+      res.status(statusCode).send({
+        success: false,
+        message: result.message,
+        errors: result.errors
+      });
+    }
+  } catch (error) {
+    console.error('Error in PUT /api/organizations/:orgId endpoint:', error);
+    res.status(500).send({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+});
+
+// Delete organization endpoint
+app.delete('/api/organizations/:orgId', async (req, res) => {
+  try {
+    const auditLogger = require('./AuditLogger');
+    const { getClientIp, getUserAgent } = require('./middleware/securityMiddleware');
+    
+    // Extract the orgId from URL parameters
+    const { orgId } = req.params;
+    
+    // Extract authentication token if provided (should be REQUIRED in production)
+    let authToken = null;
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      authToken = authHeader.substring(7);
+    }
+
+    // Delete the organization
+    const result = await applicationLayer.deleteOrganization(orgId, authToken);
+
+    // Log the deletion attempt
+    const ipAddress = getClientIp ? getClientIp(req) : req.ip;
+    const userAgent = getUserAgent ? getUserAgent(req) : req.get('user-agent');
+    
+    if (result.success) {
+      // Log successful organization deletion
+      await auditLogger.logAccess({
+        userId: authToken ? 'authenticated' : 'unknown',
+        userEmail: 'unknown',
+        userRole: 'unknown',
+        organizationId: result.deletedOrganization?.org_id || 'N/A',
+        action: 'DELETE',
+        resourceType: 'organization',
+        resourceId: result.deletedOrganization?.id || orgId,
+        ipAddress: ipAddress,
+        userAgent: userAgent,
+        success: true
+      });
+
+      res.status(200).send({
+        success: true,
+        message: result.message,
+        deletedOrganization: result.deletedOrganization
+      });
+    } else {
+      // Log failed deletion attempt
+      await auditLogger.logAccess({
+        userId: 'unknown',
+        userEmail: 'unknown',
+        userRole: 'unknown',
+        organizationId: 'N/A',
+        action: 'DELETE',
+        resourceType: 'organization',
+        resourceId: orgId,
+        ipAddress: ipAddress,
+        userAgent: userAgent,
+        success: false,
+        failureReason: result.message
+      });
+
+      // Determine appropriate status code
+      let statusCode = 400;
+      if (result.message && result.message.includes('not found')) {
+        statusCode = 404; // Not Found
+      } else if (result.message && result.message.includes('authentication')) {
+        statusCode = 401; // Unauthorized
+      }
+
+      res.status(statusCode).send({
+        success: false,
+        message: result.message,
+        errors: result.errors
+      });
+    }
+  } catch (error) {
+    console.error('Error in DELETE /api/organizations/:orgId endpoint:', error);
+    res.status(500).send({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+});
+
 // Get all rides for a specific driver
 app.get('/api/drivers/:driverID/rides', async (req, res) => {
   try {
