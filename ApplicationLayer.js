@@ -123,6 +123,78 @@ function convertFirestoreTimestamp(timestamp) {
   return null;
 }
 
+// Helper function to parse date string (format: '9/15/2025' or 'M/D/YYYY')
+function parseDateString(dateStr) {
+  if (!dateStr || typeof dateStr !== 'string') {
+    return null;
+  }
+  
+  // Parse format: M/D/YYYY or MM/DD/YYYY
+  const parts = dateStr.split('/');
+  if (parts.length !== 3) {
+    return null;
+  }
+  
+  const month = parseInt(parts[0], 10) - 1; // Month is 0-indexed in JS Date
+  const day = parseInt(parts[1], 10);
+  const year = parseInt(parts[2], 10);
+  
+  if (isNaN(month) || isNaN(day) || isNaN(year)) {
+    return null;
+  }
+  
+  return new Date(year, month, day);
+}
+
+// Helper function to parse time string (format: '11:30 AM' or '11:05 AM')
+function parseTimeString(timeStr) {
+  if (!timeStr || typeof timeStr !== 'string') {
+    return null;
+  }
+  
+  // Remove extra spaces and convert to uppercase for matching
+  const normalized = timeStr.trim().toUpperCase();
+  
+  // Match pattern: HH:MM AM/PM
+  const match = normalized.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/);
+  if (!match) {
+    return null;
+  }
+  
+  let hour = parseInt(match[1], 10);
+  const minute = parseInt(match[2], 10);
+  const period = match[3];
+  
+  if (isNaN(hour) || isNaN(minute)) {
+    return null;
+  }
+  
+  // Convert to 24-hour format
+  if (period === 'PM' && hour !== 12) {
+    hour += 12;
+  } else if (period === 'AM' && hour === 12) {
+    hour = 0;
+  }
+  
+  return { hour, minute };
+}
+
+// Helper function to combine date and time strings into a Date object
+function parseDateTimeString(dateStr, timeStr) {
+  const date = parseDateString(dateStr);
+  const time = parseTimeString(timeStr);
+  
+  if (!date || !time) {
+    return null;
+  }
+  
+  // Create a new Date object with the parsed date and time
+  const dateTime = new Date(date);
+  dateTime.setHours(time.hour, time.minute, 0, 0);
+  
+  return dateTime;
+}
+
 // Helper function to parse availability string and return structured availability
 function parseDriverAvailability(availabilityString) {
   if (!availabilityString || typeof availabilityString !== 'string') {
@@ -137,9 +209,10 @@ function parseDriverAvailability(availabilityString) {
       const startSegment = segments[i].trim();
       const endSegment = segments[i + 1].trim();
       
-      // Extract day and time from start segment (e.g., "F09" -> day: "F", time: "09")
-      const startMatch = startSegment.match(/^([MTWThF]+)(\d{2})$/);
-      const endMatch = endSegment.match(/^([MTWThF]+)(\d{2})$/);
+      // Extract day and time from start segment (e.g., "F09" or "F9" -> day: "F", time: "09" or "9")
+      // Support both 1-digit and 2-digit hour formats
+      const startMatch = startSegment.match(/^([MTWThF]+)(\d{1,2})$/);
+      const endMatch = endSegment.match(/^([MTWThF]+)(\d{1,2})$/);
       
       if (startMatch && endMatch) {
         const startDay = startMatch[1];
@@ -168,23 +241,54 @@ function parseDriverAvailability(availabilityString) {
 
 // Helper function to calculate ride timeframe based on new schema
 function calculateRideTimeframe(ride) {
-  // Support both old schema (PickupTime, AppointmentTime, TripType) and new schema (pickupTme, appointmentTime, tripType)
-  const pickupTimeField = ride.pickupTme || ride.PickupTime;
-  const appointmentTimeField = ride.appointmentTime || ride.AppointmentTime;
+  // New schema: Date (String '9/15/2025'), appointmentTime (String '11:30 AM'), pickupTme (String '11:05 AM')
+  // Note: Database uses 'pickupTme' (typo) instead of 'pickupTime'
+  const rideDate = ride.Date;
+  const pickupTimeStr = ride.pickupTme || ride.pickupTime; // Support both typo and correct spelling
+  const appointmentTimeStr = ride.appointmentTime;
   const estimatedDuration = ride.estimatedDuration || ride.EstimatedDuration;
   const tripType = ride.tripType || ride.TripType;
 
-  if (!pickupTimeField || !appointmentTimeField || !estimatedDuration) {
-    return null;
+  // Check if we have the required string fields (new schema with string dates/times)
+  if (rideDate && pickupTimeStr && appointmentTimeStr && estimatedDuration) {
+    // Check if these are strings (new format) or timestamps (old format)
+    const isStringFormat = typeof rideDate === 'string' && 
+                          typeof pickupTimeStr === 'string' && 
+                          typeof appointmentTimeStr === 'string';
+    
+    if (isStringFormat) {
+      // Parse the date and time strings
+      const pickupTime = parseDateTimeString(rideDate, pickupTimeStr);
+      const appointmentTime = parseDateTimeString(rideDate, appointmentTimeStr);
+      
+      if (pickupTime && appointmentTime) {
+        return calculateTimeframeFromTimestamps(pickupTime, appointmentTime, estimatedDuration, tripType);
+      } else {
+        console.error('Failed to parse ride date/time:', { rideDate, pickupTimeStr, appointmentTimeStr });
+        return null;
+      }
+    }
   }
   
-  const pickupTime = convertFirestoreTimestamp(pickupTimeField);
-  const appointmentTime = convertFirestoreTimestamp(appointmentTimeField);
+  // Fallback to old schema for backward compatibility (Firestore timestamps)
+  const pickupTimeField = ride.pickupTme || ride.pickupTime || ride.PickupTime;
+  const appointmentTimeField = ride.appointmentTime || ride.AppointmentTime;
   
-  if (!pickupTime || !appointmentTime) {
-    return null;
+  if (pickupTimeField && appointmentTimeField) {
+    // Check if these are timestamps (old format)
+    const pickupTime = convertFirestoreTimestamp(pickupTimeField);
+    const appointmentTime = convertFirestoreTimestamp(appointmentTimeField);
+    
+    if (pickupTime && appointmentTime) {
+      return calculateTimeframeFromTimestamps(pickupTime, appointmentTime, estimatedDuration, tripType);
+    }
   }
   
+  return null;
+}
+
+// Helper function to calculate timeframe from Date objects
+function calculateTimeframeFromTimestamps(pickupTime, appointmentTime, estimatedDuration, tripType) {
   // Calculate the total timeframe based on trip type
   let totalDurationMinutes = 0;
   let endTime;
@@ -356,7 +460,9 @@ async function matchDriversForRide(rideId) {
       
       // Only include volunteers who are active (assuming all volunteers in your DB are drivers)
       // Your volunteer documents don't have VOLUNTEER POSITION field, so we'll assume all are drivers
-      if (volunteer.volunteering_status === 'Active') {
+      // Check status case-insensitively (Active, active, ACTIVE, etc.)
+      const status = volunteer.volunteering_status ? volunteer.volunteering_status.toLowerCase() : '';
+      if (status === 'active') {
         if (isVolunteerAvailableForTimeframe(volunteer, rideTimeframe)) {
           available.push({
             id: volunteer.id,
@@ -399,7 +505,7 @@ async function matchDriversForRide(rideId) {
       available: available,
       unavailable: unavailable,
       summary: {
-        totalDrivers: volunteers.filter(v => v.volunteering_status === 'Active').length,
+        totalDrivers: volunteers.filter(v => v.volunteering_status && v.volunteering_status.toLowerCase() === 'active').length,
         availableCount: available.length,
         unavailableCount: unavailable.length
       },
@@ -494,7 +600,9 @@ async function matchDriversForRideByUID(uid) {
     const unavailable = [];
 
     for (const volunteer of volunteers) {
-      if (volunteer.volunteering_status === 'Active') {
+      // Check status case-insensitively (Active, active, ACTIVE, etc.)
+      const status = volunteer.volunteering_status ? volunteer.volunteering_status.toLowerCase() : '';
+      if (status === 'active') {
         if (isVolunteerAvailableForTimeframe(volunteer, rideTimeframe)) {
           available.push({
             id: volunteer.id,
@@ -527,7 +635,7 @@ async function matchDriversForRideByUID(uid) {
       },
       available,
       summary: {
-        totalDrivers: volunteers.filter(v => v.volunteering_status === 'Active').length,
+        totalDrivers: volunteers.filter(v => v.volunteering_status && v.volunteering_status.toLowerCase() === 'active').length,
         availableCount: available.length,
         unavailableCount: unavailable.length
       }
