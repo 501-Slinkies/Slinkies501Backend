@@ -110,7 +110,16 @@ router.get("/:user_id", async (req, res) => {
     }
 
     const saved = snapshot.docs[0].data();
-    const selectedParams = saved.selectedParams; // e.g. ["first_name", "last_name"]
+    let selectedParams = saved.selectedParams; // e.g. ["first_name", "last_name"]
+
+    // ✅ ensure selectedParams is always an array
+    if (typeof selectedParams === "string") {
+      try {
+        selectedParams = JSON.parse(selectedParams);
+      } catch {
+        selectedParams = selectedParams.replace(/[\[\]]/g, "").split(",").map(f => f.trim());
+      }
+    }
 
     // If FF passed dates, use them, otherwise default
     const startDate = start ? new Date(start) : new Date("2000-01-01");
