@@ -38,9 +38,8 @@ router.get("/", async (req, res) => {
 // ✅ POST /api/reports/save 
 router.post("/save", async (req, res) => {
   try {
+    console.log("🔥 POST BODY RECEIVED:", JSON.stringify(req.body, null, 2));  // <---- ADD THIS
 
-    console.log("🔥 Incoming POST body:", req.body);
-    
     let { user_id, selectedParams } = req.body;
 
     // if selectedParams comes as string: "[first_name,last_name]"
