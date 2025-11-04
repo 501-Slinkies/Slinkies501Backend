@@ -333,7 +333,7 @@ async function migrateCallData(filePath) {
             const confirmation1_By = row[findKey(row, 'CONFIRMATION1_BY')] || row[findKey(row, 'CONFIRMATION 1 BY')] || '';
             const confirmation2_By = row[findKey(row, 'CONFIRMATION2_BY')] || row[findKey(row, 'CONFIRMATION 2 BY')] || '';
 
-            // Map all required ride fields
+            // Map required ride fields first; optional date fields will be set only when parsed
             const rideData = {
                 ride_id: '', // Will be set by createRide
                 organization: '',
@@ -345,9 +345,7 @@ async function migrateCallData(filePath) {
                 dispatcherUID: '', 
                 startLocation: '', 
                 destinationUID: '', // Will be set below
-                // Store ISO datetime strings where possible
                 Date: parsedRideDate,
-                appointmentTime: parsedAppointmentTime || '',
                 appointment_type: row[findKey(row, 'PURPOSE OF TRIP')] || '', // No direct mapping, use purpose
                 pickupTme: row[findKey(row, 'PICK UP TIME')] || '',
                 estimatedDuration: parseDuration(row[findKey(row, 'ESTIMATED LENGTH OF APPOINTMENT')]),
@@ -360,9 +358,7 @@ async function migrateCallData(filePath) {
                 volunteerHours: 0, 
                 donationReceived: 'None', 
                 donationAmount: 0, 
-                confirmation1_Date: parsedConfirmation1 || '',
                 confirmation1_By: confirmation1_By || '',
-                confirmation2_Date: parsedConfirmation2 || '',
                 confirmation2_By: confirmation2_By || '',
                 internalComment: '',
                 externalComment: row[findKey(row, 'COMMENTS ABOUT RIDE')] || '',
@@ -370,6 +366,17 @@ async function migrateCallData(filePath) {
                 CreatedAt: new Date().toISOString(),
                 UpdatedAt: new Date().toISOString(),
             };
+
+            // Only include appointmentTime and confirmation dates if parsed as Firestore Timestamps
+            if (parsedAppointmentTime) {
+                rideData.appointmentTime = parsedAppointmentTime;
+            }
+            if (parsedConfirmation1) {
+                rideData.confirmation1_Date = parsedConfirmation1;
+            }
+            if (parsedConfirmation2) {
+                rideData.confirmation2_Date = parsedConfirmation2;
+            }
 
             // Set destinationUID as string (let createRide handle doc ref if needed)
             if (addressRef && addressRef.id) {
