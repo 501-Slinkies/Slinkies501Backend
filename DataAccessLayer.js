@@ -1,6 +1,24 @@
 const { getFirestore } = require("firebase-admin/firestore");
 const crypto = require("crypto");
 
+// Migration-friendly batch helpers
+function createBatch() {
+  const db = getFirestore();
+  return db.batch();
+}
+
+async function commitBatch(batch) {
+  return batch.commit();
+}
+
+function setBatchDoc(batch, collectionName, docId, data, options = {}) {
+  const db = getFirestore();
+  const ref = db.collection(collectionName).doc(docId);
+  if (options.merge) batch.set(ref, data, { merge: true });
+  else batch.set(ref, data);
+  return ref;
+}
+
 async function login(username, password) {
   const db = getFirestore();
   const volunteersRef = db.collection("volunteers");
@@ -749,4 +767,9 @@ module.exports = {
   getAllOrganizations,
   updateOrganization,
   deleteOrganization
+  ,
+  // Migration helpers
+  createBatch,
+  commitBatch,
+  setBatchDoc
 };

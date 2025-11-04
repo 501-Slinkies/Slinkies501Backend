@@ -1,32 +1,21 @@
 /**
  * @fileoverview Script to migrate legacy CSV data into Firestore.
  * This script reads CSV files for clients, volunteers (staff), and calls,
- * then uses standalone creation functions to populate the corresponding Firestore collections.
+ * and migrates the data into Firestore.
  */
 
 const fs = require("fs");
 const csv = require("csv-parser");
-const { db } = require('./firebase');
-// createAddress function now creates a 'destination'
-const { createClient, createVolunteer, createAddress, createRide } = require('./userCreation.js');
+const { admin, db } = require('./firebase');
+// createAddress function used to create destination documents
+const DAL = require('./DataAccessLayer.js');
 
 // --- Utility Functions ---
 
-/**
- * Finds a key in a CSV row object, ignoring case and leading/trailing whitespace.
- * @param {object} row The row object from the CSV parser.
- * @param {string} target The target key name to find (e.g., "FIRST NAME").
- * @returns {string|undefined} The matching key from the row object.
- */
 function findKey(row, target) {
-    return Object.keys(row).find(k => k.trim().toUpperCase() === target.toUpperCase());
+    return Object.keys(row).find(k => k && k.trim().toUpperCase() === target.toUpperCase());
 }
 
-/**
- * Parses a string representing a duration (e.g., "30 min", "1 hr") into an integer of minutes.
- * @param {string} durationStr The string to parse.
- * @returns {number|""} The duration in minutes, or "" if parsing fails.
- */
 function parseDuration(durationStr) {
     if (!durationStr) return "";
     let totalMinutes = 0;
@@ -37,20 +26,10 @@ function parseDuration(durationStr) {
     return totalMinutes > 0 ? totalMinutes : "";
 }
 
-/**
- * Converts a 'Y'/'N' string to a boolean.
- * @param {string} wheelchairStr The string indicating wheelchair need ('Y' or 'N').
- * @returns {boolean} True if the input is 'Y' (case-insensitive), otherwise false.
- */
 function parseWheelchair(wheelchairStr) {
     return wheelchairStr ? wheelchairStr.trim().toUpperCase() === 'Y' : false;
 }
 
-/**
- * Normalizes the trip type string from the CSV.
- * @param {string} tripTypeStr The raw trip type string.
- * @returns {string} The normalized trip type ("RoundTrip" or "OneWay").
- */
 function parseTripType(tripTypeStr) {
     if (!tripTypeStr) return "OneWay";
     const normalized = tripTypeStr.toLowerCase().replace(/\s+/g, '');
@@ -58,15 +37,59 @@ function parseTripType(tripTypeStr) {
 }
 
 /**
- * Checks for an existing destination (f.k.a. address) to avoid duplicates, or creates a new one.
- * @param {object} addressData The address data extracted from a CSV row.
- * @returns {Promise<FirebaseFirestore.DocumentReference>} A reference to the new or existing destination document.
+ * Parse date and optional time into a Firestore Timestamp, or return null when unparseable.
+ * dateStr may be like '1/2/2025' or '2025-01-02'. timeStr may be '10:30 AM'.
  */
+function parseDateTime(dateStr, timeStr) {
+    if (!dateStr && !timeStr) return null;
+    if (!dateStr && timeStr) {
+        const t = new Date(timeStr);
+        return isNaN(t.getTime()) ? null : admin.firestore.Timestamp.fromDate(t);
+    }
+    const combined = timeStr ? `${dateStr} ${timeStr}` : dateStr;
+    const dt = new Date(combined);
+    return isNaN(dt.getTime()) ? null : admin.firestore.Timestamp.fromDate(dt);
+}
+
+// Create a destination/address document (local to this migration script)
+async function createAddress(addressData) {
+  try {
+    const { street_address, city } = addressData;
+    if (!street_address || !city) {
+      throw new Error("Missing required address fields (street_address, city)");
+    }
+
+    const newAddress = {
+      destination_id: "",
+      organization: addressData.organization || "",
+      nickname: addressData.nickname || "",
+      street_address,
+      address_2: addressData.address_2 || "",
+      city,
+      state: addressData.state || "",
+      zip: addressData.zip || "",
+      town: addressData.town || city || "",
+      entered_by: addressData.entered_by || "System",
+      date_created: new Date().toISOString(),
+    };
+
+    const docRef = db.collection("destination").doc();
+    newAddress.destination_id = docRef.id;
+
+    await docRef.set(newAddress);
+
+    console.log(`Successfully created destination with ID: ${docRef.id}`);
+    return { destination_id: docRef.id, ...newAddress };
+  } catch (error) {
+    console.error("Error creating destination:", error);
+    throw error;
+  }
+}
+
+
 async function createOrFindAddress(addressData) {
-    // Ensure defaults are handled before querying
     addressData.state = addressData.state || "NY";
     addressData.zip = addressData.zip || "00000";
-    // Add town if not present (use city as fallback)
     addressData.town = addressData.town || addressData.city || "";
 
     const addressesRef = db.collection('destination');
@@ -78,18 +101,15 @@ async function createOrFindAddress(addressData) {
         .where('nickname', '==', addressData.nickname);
 
     const snapshot = await q.get();
-
     if (!snapshot.empty) {
         console.log(`Found existing destination for: ${addressData.nickname || addressData.street_address}`);
         return snapshot.docs[0].ref;
-    } else {
-        console.log(`Creating new destination for: ${addressData.nickname || addressData.street_address}`);
-        const newAddress = await createAddress(addressData); // This function now creates a 'destination'
-        return db.collection('destination').doc(newAddress.destination_id);
     }
-}
 
-// --- Generic CSV Loader ---
+    console.log(`Creating new destination for: ${addressData.nickname || addressData.street_address}`);
+    const newAddress = await createAddress(addressData);
+    return db.collection('destination').doc(newAddress.destination_id);
+}
 
 function loadCSV(filePath) {
     return new Promise((resolve, reject) => {
@@ -108,12 +128,17 @@ async function migrateClients(filePath) {
     const rows = await loadCSV(filePath);
     let limit = migrateClients.limit ?? rows.length;
     let count = 0;
+
+    const BATCH_LIMIT = 400;
+    let batch = DAL.createBatch();
+    let ops = 0;
+
     for (const row of rows) {
         if (count++ >= limit) break;
 
         const clientData = {
-            client_id: '', // Will be set by createClient
-            organization: '', // Not in CSV
+            client_id: '',
+            organization: '',
             street_address: row[findKey(row, "STREET ADDRESS")]?.trim() || '',
             address2: row[findKey(row, "ADDRESS 2")]?.trim() || '',
             first_name: row[findKey(row, "FIRST NAME")]?.trim() || '',
@@ -149,15 +174,25 @@ async function migrateClients(filePath) {
             client_status: row[findKey(row, "CLIENT STATUS")]?.trim() || 'active',
             temp_date: row[findKey(row, "temp date")]?.trim() || '',
             internal_comments: row[findKey(row, "COMMENTS")]?.trim() || '',
-            external_comments: '', // Not in CSV
+            external_comments: '',
         };
 
         try {
-            await createClient(clientData);
+            const docRef = db.collection('clients').doc();
+            clientData.client_id = docRef.id;
+            DAL.setBatchDoc(batch, 'clients', docRef.id, clientData, { merge: false });
+            ops++;
+            if (ops >= BATCH_LIMIT) {
+                await DAL.commitBatch(batch);
+                batch = DAL.createBatch();
+                ops = 0;
+            }
         } catch (error) {
             console.error(`Failed to migrate client row ${count}: ${error.message}`, clientData);
         }
     }
+
+    if (ops > 0) await DAL.commitBatch(batch);
     console.log(`Client migration finished. Processed ${count} rows.`);
 }
 
@@ -165,12 +200,17 @@ async function migrateVolunteers(filePath) {
     const rows = await loadCSV(filePath);
     let limit = migrateVolunteers.limit ?? rows.length;
     let count = 0;
+
+    const BATCH_LIMIT = 400;
+    let batch = DAL.createBatch();
+    let ops = 0;
+
     for (const row of rows) {
         if (count++ >= limit) break;
 
         const volunteerData = {
-            volunteer_id: '', // Will be set by createVolunteer
-            organization: '', // Not in CSV
+            volunteer_id: '',
+            organization: '',
             first_name: row[findKey(row, "FIRST NAME")]?.trim() || '',
             last_name: row[findKey(row, "LAST NAME")]?.trim() || '',
             password: row[findKey(row, "PASSWORD")]?.trim() || 'defaultPassword',
@@ -194,7 +234,11 @@ async function migrateVolunteers(filePath) {
             emergency_contact_relationship: row[findKey(row, "RELATIONSHIP TO VOLUNTEER")]?.trim() || '',
             type_of_vehicle: row[findKey(row, "TYPE OF VEHICLE")]?.trim() || '',
             color: row[findKey(row, "COLOR")]?.trim() || '',
-            client_preference_for_drivers: row[findKey(row, "CLIENT PREFERENCE FOR DRIVERS")]?.trim() || '',
+            client_preference_for_drivers: (() => {
+                const raw = row[findKey(row, "CLIENT PREFERENCE FOR DRIVERS")]?.trim() || '';
+                if (!raw) return [];
+                return raw.split(/[,;|]/).map(s => s.trim()).filter(Boolean);
+            })(),
             town_preference: row[findKey(row, "TOWN PREFERENCE FOR CLIENT RESIDENCE")]?.trim() || '',
             destination_limitations: row[findKey(row, "DESTINATION LIMITATIONS")]?.trim() || '',
             driver_availability_by_day_and_time: row[findKey(row, "DRIVER AVAILABILITY BY DAY & TIME")]?.trim() || '',
@@ -212,11 +256,21 @@ async function migrateVolunteers(filePath) {
         };
 
         try {
-            await createVolunteer(volunteerData);
+            const docRef = db.collection('volunteers').doc();
+            volunteerData.volunteer_id = docRef.id;
+            DAL.setBatchDoc(batch, 'volunteers', docRef.id, volunteerData, { merge: false });
+            ops++;
+            if (ops >= BATCH_LIMIT) {
+                await DAL.commitBatch(batch);
+                batch = DAL.createBatch();
+                ops = 0;
+            }
         } catch (error) {
             console.error(`Failed to migrate volunteer row ${count}: ${error.message}`, volunteerData);
         }
     }
+
+    if (ops > 0) await DAL.commitBatch(batch);
     console.log(`Volunteer migration finished. Processed ${count} rows.`);
 }
 
@@ -224,6 +278,10 @@ async function migrateCallData(filePath) {
     const rows = await loadCSV(filePath);
     let limit = migrateCallData.limit ?? rows.length;
     let count = 0;
+    // Prepare a batch for rides
+    let batch = DAL.createBatch();
+    let ops = 0;
+    const BATCH_LIMIT = 400;
     for (const row of rows) {
         if (count++ >= limit) break;
 
@@ -258,6 +316,23 @@ async function migrateCallData(filePath) {
                 continue;
             }
 
+            // Normalize and validate date/time fields. We require a parseable ride Date.
+            const rawRideDate = row[findKey(row, 'DATE OF RIDE')]?.trim() || '';
+            const parsedRideDate = parseDateTime(rawRideDate);
+            if (!parsedRideDate) {
+                console.warn(`Skipping ride in row ${count}: Missing or unparseable 'DATE OF RIDE' (${rawRideDate}).`);
+                continue;
+            }
+
+            const rawAppointmentTime = row[findKey(row, 'APPOINTMENT TIME')]?.trim() || '';
+            const parsedAppointmentTime = parseDateTime(rawRideDate, rawAppointmentTime);
+
+            const parsedConfirmation1 = parseDateTime(row[findKey(row, 'CONFIRMATION1_DATE')]?.trim() || row[findKey(row, 'CONFIRMATION 1 DATE')]?.trim() || '');
+            const parsedConfirmation2 = parseDateTime(row[findKey(row, 'CONFIRMATION2_DATE')]?.trim() || row[findKey(row, 'CONFIRMATION 2 DATE')]?.trim() || '');
+
+            const confirmation1_By = row[findKey(row, 'CONFIRMATION1_BY')] || row[findKey(row, 'CONFIRMATION 1 BY')] || '';
+            const confirmation2_By = row[findKey(row, 'CONFIRMATION2_BY')] || row[findKey(row, 'CONFIRMATION 2 BY')] || '';
+
             // Map all required ride fields
             const rideData = {
                 ride_id: '', // Will be set by createRide
@@ -270,8 +345,9 @@ async function migrateCallData(filePath) {
                 dispatcherUID: '', 
                 startLocation: '', 
                 destinationUID: '', // Will be set below
-                Date: row[findKey(row, 'DATE OF RIDE')] || '',
-                appointmentTime: row[findKey(row, 'APPOINTMENT TIME')] || '',
+                // Store ISO datetime strings where possible
+                Date: parsedRideDate,
+                appointmentTime: parsedAppointmentTime || '',
                 appointment_type: row[findKey(row, 'PURPOSE OF TRIP')] || '', // No direct mapping, use purpose
                 pickupTme: row[findKey(row, 'PICK UP TIME')] || '',
                 estimatedDuration: parseDuration(row[findKey(row, 'ESTIMATED LENGTH OF APPOINTMENT')]),
@@ -284,10 +360,10 @@ async function migrateCallData(filePath) {
                 volunteerHours: 0, 
                 donationReceived: 'None', 
                 donationAmount: 0, 
-                confirmation1_Date: '',
-                confirmation1_By: '',
-                confirmation2_Date: '',
-                confirmation2_By: '',
+                confirmation1_Date: parsedConfirmation1 || '',
+                confirmation1_By: confirmation1_By || '',
+                confirmation2_Date: parsedConfirmation2 || '',
+                confirmation2_By: confirmation2_By || '',
                 internalComment: '',
                 externalComment: row[findKey(row, 'COMMENTS ABOUT RIDE')] || '',
                 incidentReport: '',
@@ -300,12 +376,23 @@ async function migrateCallData(filePath) {
                 rideData.destinationUID = addressRef.id;
             }
 
-            await createRide(rideData);
+            // Use DataAccessLayer batch to write rides
+            const docRef = db.collection('rides').doc();
+            rideData.ride_id = docRef.id;
+            rideData.UID = docRef.id;
+            DAL.setBatchDoc(batch, 'rides', docRef.id, rideData, { merge: false });
+            ops++;
+            if (ops >= BATCH_LIMIT) {
+                await DAL.commitBatch(batch);
+                batch = DAL.createBatch();
+                ops = 0;
+            }
 
         } catch (error) {
             console.error(`Failed to migrate call data row ${count}: ${error.message}`, row);
         }
     }
+    if (ops > 0) await DAL.commitBatch(batch);
     console.log(`Call data migration finished. Processed ${count} rows.`);
 }
 
