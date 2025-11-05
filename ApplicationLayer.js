@@ -625,6 +625,18 @@ async function matchDriversForRide(rideId) {
     
     const ride = rideResult.ride;
     
+    // Get destination town for limitation checking
+    let destinationTown = null;
+    if (ride.destinationUID) {
+      const destResult = await dataAccess.getDestinationById(ride.destinationUID);
+      if (destResult.success && destResult.destination) {
+        destinationTown = destResult.destination.town || null;
+        console.log(`Ride destination town: ${destinationTown}`);
+      } else {
+        console.warn(`Could not fetch destination for ride ${rideId}: ${destResult.error}`);
+      }
+    }
+    
     // Calculate the ride timeframe using the new schema
     const rideTimeframe = calculateRideTimeframe(ride);
     if (!rideTimeframe) {
@@ -686,6 +698,30 @@ async function matchDriversForRide(rideId) {
       
       // Include active volunteers who are not on leave (or whose leave has ended)
       if (isActive && !isOnLeave) {
+        // Check destination limitations if destination town is available
+        if (destinationTown) {
+          const limitations = volunteer.destination_limitations || '';
+          if (limitations && typeof limitations === 'string') {
+            // Parse comma-separated towns and check for case-insensitive match
+            const limitedTowns = limitations.split(',').map(town => town.trim().toLowerCase());
+            const rideTownLower = destinationTown.trim().toLowerCase();
+            
+            if (limitedTowns.includes(rideTownLower)) {
+              unavailable.push({
+                id: volunteer.id,
+                name: `${volunteer.first_name} ${volunteer.last_name}`,
+                email: volunteer.email_address,
+                phone: volunteer.primary_phone,
+                vehicle: volunteer.type_of_vehicle,
+                maxRidesPerWeek: volunteer.max_rides_week,
+                availability: volunteer.driver_availability_by_day_and_time,
+                reason: `Destination town (${destinationTown}) is in driver's limitations`
+              });
+              continue; // Skip to next volunteer
+            }
+          }
+        }
+        
         // Check wheelchair requirement if ride requires wheelchair
         const rideRequiresWheelchair = ride.wheelchair === true;
         const volunteerCanHandleWheelchair = volunteer.wheelchair === true; // Default to false if field doesn't exist
@@ -818,6 +854,18 @@ async function matchDriversForRideByUID(uid) {
 
     const ride = rideResult.ride;
     
+    // Get destination town for limitation checking
+    let destinationTown = null;
+    if (ride.destinationUID) {
+      const destResult = await dataAccess.getDestinationById(ride.destinationUID);
+      if (destResult.success && destResult.destination) {
+        destinationTown = destResult.destination.town || null;
+        console.log(`Ride destination town: ${destinationTown}`);
+      } else {
+        console.warn(`Could not fetch destination for ride ${ride.UID}: ${destResult.error}`);
+      }
+    }
+    
     // Calculate the ride timeframe using the new schema
     const rideTimeframe = calculateRideTimeframe(ride);
     if (!rideTimeframe) {
@@ -847,6 +895,28 @@ async function matchDriversForRideByUID(uid) {
       // Check status case-insensitively (Active, active, ACTIVE, etc.)
       const status = volunteer.volunteering_status ? volunteer.volunteering_status.toLowerCase() : '';
       if (status === 'active') {
+        // Check destination limitations if destination town is available
+        if (destinationTown) {
+          const limitations = volunteer.destination_limitations || '';
+          if (limitations && typeof limitations === 'string') {
+            // Parse comma-separated towns and check for case-insensitive match
+            const limitedTowns = limitations.split(',').map(town => town.trim().toLowerCase());
+            const rideTownLower = destinationTown.trim().toLowerCase();
+            
+            if (limitedTowns.includes(rideTownLower)) {
+              unavailable.push({
+                id: volunteer.id,
+                name: `${volunteer.first_name} ${volunteer.last_name}`,
+                email: volunteer.email_address,
+                phone: volunteer.primary_phone,
+                vehicle: volunteer.type_of_vehicle,
+                reason: `Destination town (${destinationTown}) is in driver's limitations`
+              });
+              continue; // Skip to next volunteer
+            }
+          }
+        }
+        
         // Check wheelchair requirement if ride requires wheelchair
         const rideRequiresWheelchair = ride.wheelchair === true;
         const volunteerCanHandleWheelchair = volunteer.wheelchair === true; // Default to false if field doesn't exist
@@ -1119,6 +1189,7 @@ async function updateRideByUID(uid, updateData) {
       "internalComment",
       "externalComment",
       "incidentReport",
+      "assignedTo",
     ];
 
     // Filter out any fields that are not allowed
@@ -1156,6 +1227,59 @@ async function updateRideByUID(uid, updateData) {
     }
   } catch (error) {
     console.error('Error in updateRideByUID:', error);
+    return {
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    };
+  }
+}
+
+// Assign a driver to a ride
+async function assignDriverToRide(rideId, volunteerId) {
+  try {
+    // Validate inputs
+    if (!rideId || !volunteerId) {
+      return {
+        success: false,
+        message: 'Ride ID and volunteer ID are required'
+      };
+    }
+
+    // Verify the ride exists
+    const rideResult = await dataAccess.getRideById(rideId);
+    if (!rideResult.success) {
+      return {
+        success: false,
+        message: 'Ride not found',
+        error: rideResult.error
+      };
+    }
+
+    // Prepare update data
+    const updateData = {
+      assignedTo: volunteerId,
+      status: 'assigned',
+      UpdatedAt: new Date()
+    };
+
+    // Update the ride document
+    const result = await dataAccess.updateRideById(rideId, updateData);
+
+    if (result.success) {
+      return {
+        success: true,
+        message: 'Driver assigned to ride successfully',
+        ride: result.ride
+      };
+    } else {
+      return {
+        success: false,
+        message: result.error || 'Failed to assign driver to ride'
+      };
+    }
+  } catch (error) {
+    console.error('Error in assignDriverToRide:', error);
     return {
       success: false,
       message: 'Internal server error',
@@ -1498,6 +1622,7 @@ module.exports = {
   getAllRidesAppointmentInfo,
   getRideByUID,
   updateRideByUID,
+  assignDriverToRide,
   parseDriverAvailability,
   parseRideDateTime,
   isVolunteerAvailable,
