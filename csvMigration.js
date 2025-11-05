@@ -51,6 +51,9 @@ function parseDateTime(dateStr, timeStr) {
     return isNaN(dt.getTime()) ? null : admin.firestore.Timestamp.fromDate(dt);
 }
 
+// Default timestamp to use when CSV is missing a datetime value
+const DEFAULT_TIMESTAMP = admin.firestore.Timestamp.fromDate(new Date('2025-01-01T00:00:00Z'));
+
 // Create a destination/address document (local to this migration script)
 async function createAddress(addressData) {
   try {
@@ -367,16 +370,10 @@ async function migrateCallData(filePath) {
                 UpdatedAt: new Date().toISOString(),
             };
 
-            // Only include appointmentTime and confirmation dates if parsed as Firestore Timestamps
-            if (parsedAppointmentTime) {
-                rideData.appointmentTime = parsedAppointmentTime;
-            }
-            if (parsedConfirmation1) {
-                rideData.confirmation1_Date = parsedConfirmation1;
-            }
-            if (parsedConfirmation2) {
-                rideData.confirmation2_Date = parsedConfirmation2;
-            }
+            // Always set appointmentTime and confirmation dates — use DEFAULT_TIMESTAMP when missing
+            rideData.appointmentTime = parsedAppointmentTime || DEFAULT_TIMESTAMP;
+            rideData.confirmation1_Date = parsedConfirmation1 || DEFAULT_TIMESTAMP;
+            rideData.confirmation2_Date = parsedConfirmation2 || DEFAULT_TIMESTAMP;
 
             // Set destinationUID as string (let createRide handle doc ref if needed)
             if (addressRef && addressRef.id) {
