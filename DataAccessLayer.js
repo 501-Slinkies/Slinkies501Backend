@@ -546,7 +546,7 @@ async function createOrganization(orgData) {
     
     // Check if organization with same org_id already exists
     if (orgData.org_id) {
-      const existingOrgQuery = await db.collection("Organizations")
+      const existingOrgQuery = await db.collection("organizations")
         .where("org_id", "==", orgData.org_id)
         .get();
       
@@ -558,7 +558,7 @@ async function createOrganization(orgData) {
 
     // Check if organization with same email already exists
     if (orgData.email) {
-      const existingEmailQuery = await db.collection("Organizations")
+      const existingEmailQuery = await db.collection("organizations")
         .where("email", "==", orgData.email)
         .get();
       
@@ -576,7 +576,7 @@ async function createOrganization(orgData) {
     }
 
     // Create the organization document
-    const orgRef = db.collection("Organizations").doc();
+    const orgRef = db.collection("organizations").doc();
     console.log("About to create document with ID:", orgRef.id);
     
     await orgRef.set(orgData);
@@ -598,7 +598,7 @@ async function createOrganization(orgData) {
 async function getOrganizationById(orgId) {
   const db = getFirestore();
   try {
-    const doc = await db.collection("Organizations").doc(orgId).get();
+    const doc = await db.collection("organizations").doc(orgId).get();
     
     if (!doc.exists) {
       return { success: false, error: "Organization not found" };
@@ -617,7 +617,7 @@ async function getOrganizationById(orgId) {
 async function getOrganizationByOrgId(orgId) {
   const db = getFirestore();
   try {
-    const snapshot = await db.collection("Organizations")
+    const snapshot = await db.collection("organizations")
       .where("org_id", "==", orgId)
       .get();
     
@@ -639,7 +639,7 @@ async function getOrganizationByOrgId(orgId) {
 async function getAllOrganizations() {
   const db = getFirestore();
   try {
-    const snapshot = await db.collection("Organizations").get();
+    const snapshot = await db.collection("organizations").get();
     
     const organizations = [];
     snapshot.forEach(doc => {
@@ -660,7 +660,7 @@ async function updateOrganization(orgId, updateData) {
   const db = getFirestore();
   try {
     // Check if organization exists
-    const orgDoc = await db.collection("Organizations").doc(orgId).get();
+    const orgDoc = await db.collection("organizations").doc(orgId).get();
     if (!orgDoc.exists) {
       return { success: false, error: "Organization not found" };
     }
@@ -669,7 +669,7 @@ async function updateOrganization(orgId, updateData) {
 
     // If org_id is being changed, check it's not already taken by another organization
     if (updateData.org_id && updateData.org_id !== currentData.org_id) {
-      const existingOrgQuery = await db.collection("Organizations")
+      const existingOrgQuery = await db.collection("organizations")
         .where("org_id", "==", updateData.org_id)
         .get();
       
@@ -684,7 +684,7 @@ async function updateOrganization(orgId, updateData) {
 
     // If email is being changed, check it's not already taken by another organization
     if (updateData.email && updateData.email !== currentData.email) {
-      const existingEmailQuery = await db.collection("Organizations")
+      const existingEmailQuery = await db.collection("organizations")
         .where("email", "==", updateData.email)
         .get();
       
@@ -703,7 +703,7 @@ async function updateOrganization(orgId, updateData) {
     }
 
     // Update the organization document
-    await db.collection("Organizations").doc(orgId).update(updateData);
+    await db.collection("organizations").doc(orgId).update(updateData);
 
     return { 
       success: true, 
@@ -720,7 +720,7 @@ async function deleteOrganization(orgId) {
   const db = getFirestore();
   try {
     // Check if organization exists
-    const orgDoc = await db.collection("Organizations").doc(orgId).get();
+    const orgDoc = await db.collection("organizations").doc(orgId).get();
     if (!orgDoc.exists) {
       return { success: false, error: "Organization not found" };
     }
@@ -728,7 +728,7 @@ async function deleteOrganization(orgId) {
     const orgData = orgDoc.data();
 
     // Delete the organization document
-    await db.collection("Organizations").doc(orgId).delete();
+    await db.collection("organizations").doc(orgId).delete();
 
     return { 
       success: true, 
