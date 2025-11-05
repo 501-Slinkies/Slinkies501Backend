@@ -554,8 +554,16 @@ async function getClientByReference(clientRef) {
       return { success: false, error: "Client reference is required" };
     }
 
-    // clientRef is already a Firestore reference
-    const clientDoc = await clientRef.get();
+    let clientDoc;
+    
+    // Handle both string ID and Firestore reference
+    if (typeof clientRef === 'string') {
+      // If it's a string, create a reference to the client document
+      clientDoc = await db.collection("clients").doc(clientRef).get();
+    } else {
+      // If it's already a Firestore reference, use it directly
+      clientDoc = await clientRef.get();
+    }
     
     if (!clientDoc.exists) {
       return { success: false, error: "Client not found" };
