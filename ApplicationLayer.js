@@ -7,10 +7,58 @@ const jwt = require('jsonwebtoken');
 async function loginUser(username, password) {
   const user = await dataAccess.login(username, password);
   if (user) {
-    // In a real application, you would generate a JWT token here
-    // and send it back to the user for session management.
+    // Get JWT secret from environment or use default (for development only)
+    const secretKey = process.env.JWT_SECRET || 'your-secret-key';
+    
+    // Fetch organization information if volunteer has organization field
+    let organizationInfo = null;
+    if (user.organization) {
+      try {
+        // Match volunteer's organization field to org_id in organizations collection
+        const orgResult = await dataAccess.getOrganizationByOrgId(user.organization);
+        if (orgResult.success && orgResult.organization) {
+          organizationInfo = {
+            id: orgResult.organization.id,
+            org_id: orgResult.organization.org_id,
+            name: orgResult.organization.name,
+            email: orgResult.organization.email
+          };
+        } else {
+          console.warn(`Organization not found for org_id: ${user.organization}`);
+        }
+      } catch (error) {
+        console.error('Error fetching organization during login:', error);
+        // Continue with login even if organization fetch fails
+      }
+    }
+    
+    // Prepare the payload for the JWT token
+    // Include user info and roles array from the user document
+    const tokenPayload = {
+      userId: user.id,
+      email: user.email_address,
+      roles: user.roles || [], // Include the roles array from user document
+      org: organizationInfo ? organizationInfo.org_id : null, // Include organization org_id if found
+      orgId: organizationInfo ? organizationInfo.id : null, // Include organization document ID if found
+      iat: Math.floor(Date.now() / 1000) // Issued at timestamp
+    };
+    
+    // Generate JWT token with expiration (default: 24 hours)
+    const expiresIn = process.env.SESSION_TIMEOUT_MINUTES || '24h';
+    const token = jwt.sign(tokenPayload, secretKey, { expiresIn });
+    
     console.log('Login successful for user:', user.email_address);
-    return { success: true, user: { email: user.email_address, roles: user.roles || [] } };
+    return { 
+      success: true, 
+      token: token,
+      user: { 
+        email: user.email_address, 
+        roles: user.roles || [], // Available roles from user document
+        userId: user.volunteer_id,
+        organizationId: organizationInfo ? organizationInfo.org_id : null, // Organization ID (org_id)
+        organization: organizationInfo // Full organization details (optional)
+      } 
+    };
   } else {
     console.log('Login failed');
     return { success: false, message: 'Invalid credentials' };
@@ -196,6 +244,7 @@ function parseDateTimeString(dateStr, timeStr) {
 }
 
 // Helper function to parse availability string and return structured availability
+// Format: DHH:MM;DHH:MM; where D is day (M, T, W, Th, F) and HH:MM is time in 24-hour format
 function parseDriverAvailability(availabilityString) {
   if (!availabilityString || typeof availabilityString !== 'string') {
     return [];
@@ -209,27 +258,41 @@ function parseDriverAvailability(availabilityString) {
       const startSegment = segments[i].trim();
       const endSegment = segments[i + 1].trim();
       
-      // Extract day and time from start segment (e.g., "F09" or "F9" -> day: "F", time: "09" or "9")
-      // Support both 1-digit and 2-digit hour formats
-      const startMatch = startSegment.match(/^([MTWThF]+)(\d{1,2})$/);
-      const endMatch = endSegment.match(/^([MTWThF]+)(\d{1,2})$/);
+      // Extract day and time from start segment (e.g., "M09:00" -> day: "M", hour: 9, minute: 0)
+      // Format: DHH:MM where D is day abbreviation and HH:MM is 24-hour time
+      const startMatch = startSegment.match(/^([MTWThF]+)(\d{2}):(\d{2})$/);
+      const endMatch = endSegment.match(/^([MTWThF]+)(\d{2}):(\d{2})$/);
       
       if (startMatch && endMatch) {
         const startDay = startMatch[1];
-        const startTime = parseInt(startMatch[2]);
+        const startHour = parseInt(startMatch[2], 10);
+        const startMinute = parseInt(startMatch[3], 10);
         const endDay = endMatch[1];
-        const endTime = parseInt(endMatch[2]);
+        const endHour = parseInt(endMatch[2], 10);
+        const endMinute = parseInt(endMatch[3], 10);
+        
+        // Validate time values
+        if (isNaN(startHour) || isNaN(startMinute) || isNaN(endHour) || isNaN(endMinute)) {
+          continue;
+        }
+        if (startHour < 0 || startHour > 23 || endHour < 0 || endHour > 23) {
+          continue;
+        }
+        if (startMinute < 0 || startMinute > 59 || endMinute < 0 || endMinute > 59) {
+          continue;
+        }
         
         // Convert to day names
         const startDayName = parseDayAbbreviation(startDay);
         const endDayName = parseDayAbbreviation(endDay);
         
         if (startDayName && endDayName) {
+          // Store time as decimal hours (hours + minutes/60) for easier comparison
           availability.push({
             startDay: startDayName,
-            startTime: startTime,
+            startTime: startHour + (startMinute / 60),
             endDay: endDayName,
-            endTime: endTime
+            endTime: endHour + (endMinute / 60)
           });
         }
       }
@@ -364,15 +427,16 @@ function isVolunteerAvailableForTimeframe(volunteer, rideTimeframe) {
   // Get the day of the week for the ride
   const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const rideDay = dayNames[rideTimeframe.startTime.getDay()];
-  const rideStartHour = rideTimeframe.startTime.getHours();
-  const rideEndHour = rideTimeframe.endTime.getHours();
+  // Convert ride times to decimal hours (hours + minutes/60) for comparison with parsed availability
+  const rideStartTime = rideTimeframe.startTime.getHours() + (rideTimeframe.startTime.getMinutes() / 60);
+  const rideEndTime = rideTimeframe.endTime.getHours() + (rideTimeframe.endTime.getMinutes() / 60);
   
   // Check if the volunteer is available on the ride day
   for (const slot of availability) {
     if (slot.startDay === rideDay) {
       // Check if the entire ride timeframe falls within the volunteer's availability
       // We need the volunteer to be available from start to end of the ride
-      if (rideStartHour >= slot.startTime && rideEndHour <= slot.endTime) {
+      if (rideStartTime >= slot.startTime && rideEndTime <= slot.endTime) {
         return true;
       }
     }
