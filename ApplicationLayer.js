@@ -493,6 +493,156 @@ function parseRideDateTime(rideDate, rideTime) {
   };
 }
 
+// Helper function to check if car heights match
+// client car_height_needed can contain: low, med, high (any combination, comma or semicolon-separated)
+// If empty, all car heights are acceptable
+// volunteer car_height should match one of the client's needed heights
+function matchesCarHeight(clientCarHeightNeeded, volunteerCarHeight) {
+  if (!clientCarHeightNeeded || typeof clientCarHeightNeeded !== 'string' || clientCarHeightNeeded.trim() === '') {
+    // If client has no car height requirement, all heights are acceptable
+    return true;
+  }
+  
+  if (!volunteerCarHeight || typeof volunteerCarHeight !== 'string') {
+    // If volunteer has no car height specified, cannot match
+    return false;
+  }
+  
+  // Parse client's needed heights (comma or semicolon-separated, case-insensitive)
+  // Support both comma and semicolon separators
+  const neededHeights = clientCarHeightNeeded.split(/[,;]/)
+    .map(h => h.trim().toLowerCase())
+    .filter(h => h.length > 0);
+  
+  // Check if volunteer's car height matches any of the needed heights
+  const volunteerHeightLower = volunteerCarHeight.trim().toLowerCase();
+  return neededHeights.includes(volunteerHeightLower);
+}
+
+// Helper function to check if allergies match
+// client allergies is comma-separated string
+// volunteer allergens_in_car is comma-separated string (allergens the volunteer allows)
+// All client allergies must be in volunteer's allowed list for a match
+// If client has no allergies, it's always a match
+// If volunteer has no allergens_in_car (empty string), they allow all allergies (no restrictions)
+function matchesAllergies(clientAllergies, volunteerAllergiesInCar) {
+  if (!clientAllergies || typeof clientAllergies !== 'string' || clientAllergies.trim() === '') {
+    // If client has no allergies, it's always a match
+    return true;
+  }
+  
+  // If volunteer has no allergens_in_car specified (empty string), they allow all allergies (no restrictions)
+  if (!volunteerAllergiesInCar || typeof volunteerAllergiesInCar !== 'string' || volunteerAllergiesInCar.trim() === '') {
+    return true; // Empty means no restrictions - allow all
+  }
+  
+  // Parse client allergies (comma-separated, case-insensitive)
+  const clientAllergyList = clientAllergies.split(',')
+    .map(a => a.trim().toLowerCase())
+    .filter(a => a.length > 0);
+  
+  // Parse volunteer allowed allergies (comma-separated, case-insensitive)
+  const volunteerAllergyList = volunteerAllergiesInCar.split(',')
+    .map(a => a.trim().toLowerCase())
+    .filter(a => a.length > 0);
+  
+  // If volunteer's list is empty after parsing, they allow all (no restrictions)
+  if (volunteerAllergyList.length === 0) {
+    return true;
+  }
+  
+  // Check if all client allergies are in volunteer's allowed list
+  return clientAllergyList.every(clientAllergy => 
+    volunteerAllergyList.includes(clientAllergy)
+  );
+}
+
+// Helper function to check if mobility assistance matches
+// client mobility_assistance is comma-separated string
+// volunteer mobility_accommodation is comma-separated string
+// All client mobility assistance needs must be in volunteer's accommodations
+function matchesMobilityAssistance(clientMobilityAssistance, volunteerMobilityAccommodation) {
+  if (!clientMobilityAssistance || typeof clientMobilityAssistance !== 'string' || clientMobilityAssistance.trim() === '') {
+    // If client has no mobility assistance needs, it's always a match
+    return true;
+  }
+  
+  if (!volunteerMobilityAccommodation || typeof volunteerMobilityAccommodation !== 'string' || volunteerMobilityAccommodation.trim() === '') {
+    // If volunteer has no mobility accommodations, they cannot match
+    return false;
+  }
+  
+  // Parse client mobility assistance needs (comma-separated, case-insensitive)
+  const clientMobilityList = clientMobilityAssistance.split(',')
+    .map(m => m.trim().toLowerCase())
+    .filter(m => m.length > 0);
+  
+  // Parse volunteer mobility accommodations (comma-separated, case-insensitive)
+  const volunteerMobilityList = volunteerMobilityAccommodation.split(',')
+    .map(m => m.trim().toLowerCase())
+    .filter(m => m.length > 0);
+  
+  // Check if all client mobility needs are in volunteer's accommodations
+  return clientMobilityList.every(clientMobility => 
+    volunteerMobilityList.includes(clientMobility)
+  );
+}
+
+// Helper function to check all client-volunteer matching criteria
+// Returns { match: boolean, reason: string } if match is false
+function matchesClientVolunteerCriteria(client, volunteer) {
+  // Check car height
+  if (!matchesCarHeight(client.car_height_needed, volunteer.car_height)) {
+    return { match: false, reason: 'Car height requirement not met' };
+  }
+  
+  // Check oxygen - both must have oxygen capability or both must not require it
+  const clientNeedsOxygen = client.oxygen === true;
+  const volunteerHasOxygen = volunteer.oxygen === true;
+  if (clientNeedsOxygen && !volunteerHasOxygen) {
+    return { match: false, reason: 'Client requires oxygen capability' };
+  }
+  
+  // Check service animal - if client has service animal, volunteer must accept it
+  const clientHasServiceAnimal = client.service_animal === true;
+  const volunteerAcceptsServiceAnimal = volunteer.accepts_service_animal === true;
+  if (clientHasServiceAnimal && !volunteerAcceptsServiceAnimal) {
+    return { match: false, reason: 'Client has service animal but volunteer does not accept service animals' };
+  }
+  
+  // Check allergies - all client allergies must be in volunteer's allowed list
+  if (!matchesAllergies(client.allergies, volunteer.allergens_in_car)) {
+    return { match: false, reason: 'Client allergies not compatible with volunteer vehicle' };
+  }
+  
+  // Check mobility assistance - all client needs must be in volunteer's accommodations
+  if (!matchesMobilityAssistance(client.mobility_assistance, volunteer.mobility_accommodation)) {
+    return { match: false, reason: 'Client mobility assistance needs not met' };
+  }
+  
+  return { match: true };
+}
+
+// Helper function to check if a volunteer has a driver role
+// Checks if any role in the volunteer's roles array contains "driver" (case-insensitive)
+// Supports variants like: "driver", "default_driver", "pen_driver", "fish_rush_driver", etc.
+function isDriverRole(volunteer) {
+  if (!volunteer || !volunteer.roles) {
+    return false;
+  }
+  
+  // Handle both array and string formats
+  const roles = Array.isArray(volunteer.roles) ? volunteer.roles : [volunteer.roles];
+  
+  // Check if any role contains "driver" (case-insensitive)
+  return roles.some(role => {
+    if (typeof role !== 'string') {
+      return false;
+    }
+    return role.toLowerCase().includes('driver');
+  });
+}
+
 // Helper function to check if a volunteer is available for a specific ride timeframe
 function isVolunteerAvailableForTimeframe(volunteer, rideTimeframe) {
   if (!volunteer.driver_availability_by_day_and_time || !rideTimeframe) {
@@ -625,6 +775,20 @@ async function matchDriversForRide(rideId) {
     
     const ride = rideResult.ride;
     
+    // Get client document for matching criteria
+    let client = null;
+    if (ride.clientUID) {
+      const clientResult = await dataAccess.getClientByReference(ride.clientUID);
+      if (clientResult.success && clientResult.client) {
+        client = clientResult.client;
+        console.log(`Client fetched successfully: ${client.first_name} ${client.last_name}`);
+      } else {
+        console.warn(`Could not fetch client for ride ${rideId}: ${clientResult.error}`);
+      }
+    } else {
+      console.warn(`Ride ${rideId} has no clientUID`);
+    }
+    
     // Get destination town for limitation checking
     let destinationTown = null;
     if (ride.destinationUID) {
@@ -673,8 +837,12 @@ async function matchDriversForRide(rideId) {
     for (const volunteer of volunteers) {
       console.log(`Processing volunteer: ${volunteer.first_name} ${volunteer.last_name}, status: ${volunteer.volunteering_status}`);
       
-      // Only include volunteers who are active (assuming all volunteers in your DB are drivers)
-      // Your volunteer documents don't have VOLUNTEER POSITION field, so we'll assume all are drivers
+      // Only include volunteers who have a driver role (supports variants like default_driver, pen_driver, fish_rush_driver)
+      // Skip non-driver volunteers entirely - don't include them in results
+      if (!isDriverRole(volunteer)) {
+        continue; // Skip to next volunteer
+      }
+      
       // Check status case-insensitively (Active, active, ACTIVE, etc.)
       const status = volunteer.volunteering_status ? volunteer.volunteering_status.toLowerCase() : '';
       
@@ -698,47 +866,76 @@ async function matchDriversForRide(rideId) {
       
       // Include active volunteers who are not on leave (or whose leave has ended)
       if (isActive && !isOnLeave) {
-        // Check destination limitations if destination town is available
-        if (destinationTown) {
-          const limitations = volunteer.destination_limitations || '';
-          if (limitations && typeof limitations === 'string') {
-            // Parse comma-separated towns and check for case-insensitive match
-            const limitedTowns = limitations.split(',').map(town => town.trim().toLowerCase());
+        // Check destination limitations against both destination town and client's city
+        const limitations = volunteer.destination_limitations || '';
+        if (limitations && typeof limitations === 'string') {
+          // Parse comma-separated towns and check for case-insensitive match
+          const limitedTowns = limitations.split(',').map(town => town.trim().toLowerCase());
+          
+          // Check destination town
+          let isLimited = false;
+          let limitationReason = '';
+          
+          if (destinationTown) {
             const rideTownLower = destinationTown.trim().toLowerCase();
-            
             if (limitedTowns.includes(rideTownLower)) {
-              unavailable.push({
-                id: volunteer.id,
-                name: `${volunteer.first_name} ${volunteer.last_name}`,
-                email: volunteer.email_address,
-                phone: volunteer.primary_phone,
-                vehicle: volunteer.type_of_vehicle,
-                maxRidesPerWeek: volunteer.max_rides_week,
-                availability: volunteer.driver_availability_by_day_and_time,
-                reason: `Destination town (${destinationTown}) is in driver's limitations`
-              });
-              continue; // Skip to next volunteer
+              isLimited = true;
+              limitationReason = `Destination town (${destinationTown}) is in driver's limitations`;
             }
+          }
+          
+          // Check client's city/town
+          if (!isLimited && client && client.city) {
+            const clientCityLower = client.city.trim().toLowerCase();
+            if (limitedTowns.includes(clientCityLower)) {
+              isLimited = true;
+              limitationReason = `Client's city (${client.city}) is in driver's limitations`;
+            }
+          }
+          
+          if (isLimited) {
+            unavailable.push({
+              id: volunteer.id,
+              name: `${volunteer.first_name} ${volunteer.last_name}`,
+              email: volunteer.email_address,
+              phone: volunteer.primary_phone,
+              vehicle: volunteer.type_of_vehicle,
+              maxRidesPerWeek: volunteer.max_rides_week,
+              availability: volunteer.driver_availability_by_day_and_time,
+              oxygen: volunteer.oxygen || false,
+              mobility_accommodation: volunteer.mobility_accommodation || '',
+              accepts_service_animal: volunteer.accepts_service_animal || false,
+              destination_limitations: volunteer.destination_limitations || '',
+              allergens_in_car: volunteer.allergens_in_car || '',
+              reason: limitationReason
+            });
+            continue; // Skip to next volunteer
           }
         }
         
-        // Check wheelchair requirement if ride requires wheelchair
-        const rideRequiresWheelchair = ride.wheelchair === true;
-        const volunteerCanHandleWheelchair = volunteer.wheelchair === true; // Default to false if field doesn't exist
-        
-        // If ride requires wheelchair but volunteer cannot handle it, skip this volunteer
-        if (rideRequiresWheelchair && !volunteerCanHandleWheelchair) {
-          unavailable.push({
-            id: volunteer.id,
-            name: `${volunteer.first_name} ${volunteer.last_name}`,
-            email: volunteer.email_address,
-            phone: volunteer.primary_phone,
-            vehicle: volunteer.type_of_vehicle,
-            maxRidesPerWeek: volunteer.max_rides_week,
-            availability: volunteer.driver_availability_by_day_and_time,
-            reason: 'Ride requires wheelchair capability'
-          });
-          continue; // Skip to next volunteer
+        // Check client-volunteer matching criteria (car height, oxygen, service animal, allergies, mobility assistance)
+        if (client) {
+          const criteriaMatch = matchesClientVolunteerCriteria(client, volunteer);
+          if (!criteriaMatch.match) {
+            unavailable.push({
+              id: volunteer.id,
+              name: `${volunteer.first_name} ${volunteer.last_name}`,
+              email: volunteer.email_address,
+              phone: volunteer.primary_phone,
+              vehicle: volunteer.type_of_vehicle,
+              maxRidesPerWeek: volunteer.max_rides_week,
+              availability: volunteer.driver_availability_by_day_and_time,
+              oxygen: volunteer.oxygen || false,
+              mobility_accommodation: volunteer.mobility_accommodation || '',
+              accepts_service_animal: volunteer.accepts_service_animal || false,
+              destination_limitations: volunteer.destination_limitations || '',
+              allergens_in_car: volunteer.allergens_in_car || '',
+              reason: criteriaMatch.reason
+            });
+            continue; // Skip to next volunteer
+          }
+        } else {
+          console.warn(`Skipping client-volunteer matching for ride ${rideId} - client not found`);
         }
         
         // Check availability for timeframe
@@ -751,7 +948,11 @@ async function matchDriversForRide(rideId) {
             vehicle: volunteer.type_of_vehicle,
             maxRidesPerWeek: volunteer.max_rides_week,
             availability: volunteer.driver_availability_by_day_and_time,
-            wheelchairCapable: volunteerCanHandleWheelchair
+            oxygen: volunteer.oxygen || false,
+            mobility_accommodation: volunteer.mobility_accommodation || '',
+            accepts_service_animal: volunteer.accepts_service_animal || false,
+            destination_limitations: volunteer.destination_limitations || '',
+            allergens_in_car: volunteer.allergens_in_car || ''
           });
         } else {
           unavailable.push({
@@ -762,6 +963,11 @@ async function matchDriversForRide(rideId) {
             vehicle: volunteer.type_of_vehicle,
             maxRidesPerWeek: volunteer.max_rides_week,
             availability: volunteer.driver_availability_by_day_and_time,
+            oxygen: volunteer.oxygen || false,
+            mobility_accommodation: volunteer.mobility_accommodation || '',
+            accepts_service_animal: volunteer.accepts_service_animal || false,
+            destination_limitations: volunteer.destination_limitations || '',
+            allergens_in_car: volunteer.allergens_in_car || '',
             reason: 'Not available during requested timeframe'
           });
         }
@@ -854,6 +1060,20 @@ async function matchDriversForRideByUID(uid) {
 
     const ride = rideResult.ride;
     
+    // Get client document for matching criteria
+    let client = null;
+    if (ride.clientUID) {
+      const clientResult = await dataAccess.getClientByReference(ride.clientUID);
+      if (clientResult.success && clientResult.client) {
+        client = clientResult.client;
+        console.log(`Client fetched successfully: ${client.first_name} ${client.last_name}`);
+      } else {
+        console.warn(`Could not fetch client for ride ${ride.UID}: ${clientResult.error}`);
+      }
+    } else {
+      console.warn(`Ride ${ride.UID} has no clientUID`);
+    }
+    
     // Get destination town for limitation checking
     let destinationTown = null;
     if (ride.destinationUID) {
@@ -892,46 +1112,81 @@ async function matchDriversForRideByUID(uid) {
     const unavailable = [];
 
     for (const volunteer of volunteers) {
+      // Only include volunteers who have a driver role (supports variants like default_driver, pen_driver, fish_rush_driver)
+      // Skip non-driver volunteers entirely - don't include them in results
+      if (!isDriverRole(volunteer)) {
+        continue; // Skip to next volunteer
+      }
+      
       // Check status case-insensitively (Active, active, ACTIVE, etc.)
       const status = volunteer.volunteering_status ? volunteer.volunteering_status.toLowerCase() : '';
       if (status === 'active') {
-        // Check destination limitations if destination town is available
-        if (destinationTown) {
-          const limitations = volunteer.destination_limitations || '';
-          if (limitations && typeof limitations === 'string') {
-            // Parse comma-separated towns and check for case-insensitive match
-            const limitedTowns = limitations.split(',').map(town => town.trim().toLowerCase());
+        // Check destination limitations against both destination town and client's city
+        const limitations = volunteer.destination_limitations || '';
+        if (limitations && typeof limitations === 'string') {
+          // Parse comma-separated towns and check for case-insensitive match
+          const limitedTowns = limitations.split(',').map(town => town.trim().toLowerCase());
+          
+          // Check destination town
+          let isLimited = false;
+          let limitationReason = '';
+          
+          if (destinationTown) {
             const rideTownLower = destinationTown.trim().toLowerCase();
-            
             if (limitedTowns.includes(rideTownLower)) {
-              unavailable.push({
-                id: volunteer.id,
-                name: `${volunteer.first_name} ${volunteer.last_name}`,
-                email: volunteer.email_address,
-                phone: volunteer.primary_phone,
-                vehicle: volunteer.type_of_vehicle,
-                reason: `Destination town (${destinationTown}) is in driver's limitations`
-              });
-              continue; // Skip to next volunteer
+              isLimited = true;
+              limitationReason = `Destination town (${destinationTown}) is in driver's limitations`;
             }
+          }
+          
+          // Check client's city/town
+          if (!isLimited && client && client.city) {
+            const clientCityLower = client.city.trim().toLowerCase();
+            if (limitedTowns.includes(clientCityLower)) {
+              isLimited = true;
+              limitationReason = `Client's city (${client.city}) is in driver's limitations`;
+            }
+          }
+          
+          if (isLimited) {
+            unavailable.push({
+              id: volunteer.id,
+              name: `${volunteer.first_name} ${volunteer.last_name}`,
+              email: volunteer.email_address,
+              phone: volunteer.primary_phone,
+              vehicle: volunteer.type_of_vehicle,
+              oxygen: volunteer.oxygen || false,
+              mobility_accommodation: volunteer.mobility_accommodation || '',
+              accepts_service_animal: volunteer.accepts_service_animal || false,
+              destination_limitations: volunteer.destination_limitations || '',
+              allergens_in_car: volunteer.allergens_in_car || '',
+              reason: limitationReason
+            });
+            continue; // Skip to next volunteer
           }
         }
         
-        // Check wheelchair requirement if ride requires wheelchair
-        const rideRequiresWheelchair = ride.wheelchair === true;
-        const volunteerCanHandleWheelchair = volunteer.wheelchair === true; // Default to false if field doesn't exist
-        
-        // If ride requires wheelchair but volunteer cannot handle it, skip this volunteer
-        if (rideRequiresWheelchair && !volunteerCanHandleWheelchair) {
-          unavailable.push({
-            id: volunteer.id,
-            name: `${volunteer.first_name} ${volunteer.last_name}`,
-            email: volunteer.email_address,
-            phone: volunteer.primary_phone,
-            vehicle: volunteer.type_of_vehicle,
-            reason: 'Ride requires wheelchair capability'
-          });
-          continue; // Skip to next volunteer
+        // Check client-volunteer matching criteria (car height, oxygen, service animal, allergies, mobility assistance)
+        if (client) {
+          const criteriaMatch = matchesClientVolunteerCriteria(client, volunteer);
+          if (!criteriaMatch.match) {
+            unavailable.push({
+              id: volunteer.id,
+              name: `${volunteer.first_name} ${volunteer.last_name}`,
+              email: volunteer.email_address,
+              phone: volunteer.primary_phone,
+              vehicle: volunteer.type_of_vehicle,
+              oxygen: volunteer.oxygen || false,
+              mobility_accommodation: volunteer.mobility_accommodation || '',
+              accepts_service_animal: volunteer.accepts_service_animal || false,
+              destination_limitations: volunteer.destination_limitations || '',
+              allergens_in_car: volunteer.allergens_in_car || '',
+              reason: criteriaMatch.reason
+            });
+            continue; // Skip to next volunteer
+          }
+        } else {
+          console.warn(`Skipping client-volunteer matching for ride ${ride.UID} - client not found`);
         }
         
         // Check availability for timeframe
@@ -942,7 +1197,11 @@ async function matchDriversForRideByUID(uid) {
             email: volunteer.email_address,
             phone: volunteer.primary_phone,
             vehicle: volunteer.type_of_vehicle,
-            wheelchairCapable: volunteerCanHandleWheelchair
+            oxygen: volunteer.oxygen || false,
+            mobility_accommodation: volunteer.mobility_accommodation || '',
+            accepts_service_animal: volunteer.accepts_service_animal || false,
+            destination_limitations: volunteer.destination_limitations || '',
+            allergens_in_car: volunteer.allergens_in_car || ''
           });
         } else {
           unavailable.push({
@@ -951,6 +1210,11 @@ async function matchDriversForRideByUID(uid) {
             email: volunteer.email_address,
             phone: volunteer.primary_phone,
             vehicle: volunteer.type_of_vehicle,
+            oxygen: volunteer.oxygen || false,
+            mobility_accommodation: volunteer.mobility_accommodation || '',
+            accepts_service_animal: volunteer.accepts_service_animal || false,
+            destination_limitations: volunteer.destination_limitations || '',
+            allergens_in_car: volunteer.allergens_in_car || '',
             reason: 'Not available during requested timeframe'
           });
         }
