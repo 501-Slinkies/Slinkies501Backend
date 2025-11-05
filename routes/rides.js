@@ -110,6 +110,38 @@ router.get("/:uid/match-drivers", async (req, res) => {
 });
 
 /**
+ * POST /api/rides/:ride_id/assign
+ * Assigns a driver (volunteer) to a ride
+ * Body: { "volunteer_id": "volunteer-document-id" }
+ */
+router.post("/:ride_id/assign", async (req, res) => {
+  try {
+    const { ride_id } = req.params;
+    const { volunteer_id } = req.body;
+    
+    if (!ride_id) {
+      return res.status(400).json({ success: false, message: "Ride ID is required" });
+    }
+    
+    if (!volunteer_id) {
+      return res.status(400).json({ success: false, message: "Volunteer ID is required" });
+    }
+
+    const result = await applicationLayer.assignDriverToRide(ride_id, volunteer_id);
+
+    if (result.success) {
+      res.status(200).json(result);
+    } else {
+      const statusCode = result.message.includes('not found') ? 404 : 400;
+      res.status(statusCode).json(result);
+    }
+  } catch (error) {
+    console.error("Error assigning driver to ride:", error);
+    res.status(500).json({ success: false, message: "Server error", error: error.message });
+  }
+});
+
+/**
  * PUT /api/rides/:uid
  * Updates a ride's data (with permission checks)
  */

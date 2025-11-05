@@ -514,6 +514,39 @@ async function updateRideByUID(uid, updateData) {
   }
 }
 
+async function updateRideById(rideId, updateData) {
+  const db = getFirestore();
+  try {
+    // Try both "Rides" (capital R) and "rides" (lowercase) for compatibility
+    let rideRef = db.collection("Rides").doc(rideId);
+    let doc = await rideRef.get();
+    
+    if (!doc.exists) {
+      // Fallback to lowercase if not found
+      rideRef = db.collection("rides").doc(rideId);
+      doc = await rideRef.get();
+    }
+    
+    if (!doc.exists) {
+      return { success: false, error: "Ride not found" };
+    }
+
+    // Update the document
+    await rideRef.update(updateData);
+
+    // Get the updated document
+    const updatedDoc = await rideRef.get();
+    
+    return {
+      success: true,
+      ride: { id: updatedDoc.id, ...updatedDoc.data() }
+    };
+  } catch (error) {
+    console.error("Error updating ride by ID:", error);
+    return { success: false, error: error.message };
+  }
+}
+
 async function getClientByReference(clientRef) {
   const db = getFirestore();
   try {
@@ -534,6 +567,45 @@ async function getClientByReference(clientRef) {
     };
   } catch (error) {
     console.error("Error fetching client by reference:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+async function getDestinationById(destinationId) {
+  const db = getFirestore();
+  try {
+    if (!destinationId) {
+      return { success: false, error: "Destination ID is required" };
+    }
+
+    // Handle both document ID (string) and Firestore reference
+    let destinationDoc;
+    if (typeof destinationId === 'string') {
+      // Try both "destination" (lowercase) and "Destination" (capital D) for compatibility
+      let destRef = db.collection("destination").doc(destinationId);
+      destinationDoc = await destRef.get();
+      
+      if (!destinationDoc.exists) {
+        destRef = db.collection("Destination").doc(destinationId);
+        destinationDoc = await destRef.get();
+      }
+    } else if (destinationId && typeof destinationId === 'object' && destinationId.get) {
+      // It's a Firestore reference
+      destinationDoc = await destinationId.get();
+    } else {
+      return { success: false, error: "Invalid destination ID format" };
+    }
+    
+    if (!destinationDoc.exists) {
+      return { success: false, error: "Destination not found" };
+    }
+
+    return {
+      success: true,
+      destination: { id: destinationDoc.id, ...destinationDoc.data() }
+    };
+  } catch (error) {
+    console.error("Error fetching destination:", error);
     return { success: false, error: error.message };
   }
 }
@@ -752,7 +824,9 @@ module.exports = {
   createRide,
   getRideByUID,
   updateRideByUID,
+  updateRideById,
   getClientByReference,
+  getDestinationById,
   getRidesByDriverId,
   createUser,
   getUserByEmail,
