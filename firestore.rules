@@ -23,7 +23,7 @@ service cloud.firestore {
       allow delete: if true;
     }
 
-    match /Organizations/{document} {
+    match /organizations/{document} {
       allow create: if true;
       allow read: if true;
       allow write: if true;
