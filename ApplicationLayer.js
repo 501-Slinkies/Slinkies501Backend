@@ -154,20 +154,46 @@ function parseDayAbbreviation(dayAbbr) {
     'T': 'Tuesday', 
     'W': 'Wednesday',
     'Th': 'Thursday',
-    'F': 'Friday'
+    'F': 'Friday',
+    'S': 'Saturday',  // Support Saturday
+    'Sa': 'Saturday', // Alternative Saturday format
+    'Su': 'Sunday',   // Support Sunday
+    'Sun': 'Sunday'   // Alternative Sunday format
   };
   return dayMap[dayAbbr] || null;
 }
 
 // Helper function to convert Firestore timestamp to Date
 function convertFirestoreTimestamp(timestamp) {
-  if (timestamp && timestamp.toDate) {
-    return timestamp.toDate();
-  } else if (timestamp instanceof Date) {
-    return timestamp;
-  } else if (typeof timestamp === 'string') {
-    return new Date(timestamp);
+  if (!timestamp) {
+    return null;
   }
+  
+  // Firestore Timestamp object
+  if (timestamp && typeof timestamp === 'object' && timestamp.toDate && typeof timestamp.toDate === 'function') {
+    return timestamp.toDate();
+  }
+  
+  // Already a Date object
+  if (timestamp instanceof Date) {
+    return timestamp;
+  }
+  
+  // ISO string or other string format
+  if (typeof timestamp === 'string') {
+    const parsed = new Date(timestamp);
+    if (!isNaN(parsed.getTime())) {
+      return parsed;
+    }
+  }
+  
+  // Firestore Timestamp-like object (check for seconds/nanoseconds)
+  if (timestamp && typeof timestamp === 'object' && (timestamp.seconds !== undefined || timestamp._seconds !== undefined)) {
+    const seconds = timestamp.seconds || timestamp._seconds || 0;
+    const nanoseconds = timestamp.nanoseconds || timestamp._nanoseconds || 0;
+    return new Date(seconds * 1000 + nanoseconds / 1000000);
+  }
+  
   return null;
 }
 
@@ -260,8 +286,10 @@ function parseDriverAvailability(availabilityString) {
       
       // Extract day and time from start segment (e.g., "M09:00" -> day: "M", hour: 9, minute: 0)
       // Format: DHH:MM where D is day abbreviation and HH:MM is 24-hour time
-      const startMatch = startSegment.match(/^([MTWThF]+)(\d{2}):(\d{2})$/);
-      const endMatch = endSegment.match(/^([MTWThF]+)(\d{2}):(\d{2})$/);
+      // Support: M, T, W, Th, F, S, Sa, Su, Sun
+      // Match order: longest first (Sun, Su, Sa, S, then weekday abbreviations)
+      const startMatch = startSegment.match(/^(Sun|Su|Sa|S|[MTWThF]+)(\d{2}):(\d{2})$/);
+      const endMatch = endSegment.match(/^(Sun|Su|Sa|S|[MTWThF]+)(\d{2}):(\d{2})$/);
       
       if (startMatch && endMatch) {
         const startDay = startMatch[1];
@@ -286,7 +314,8 @@ function parseDriverAvailability(availabilityString) {
         const startDayName = parseDayAbbreviation(startDay);
         const endDayName = parseDayAbbreviation(endDay);
         
-        if (startDayName && endDayName) {
+        // Only create availability slot if both days are valid and match (same day)
+        if (startDayName && endDayName && startDayName === endDayName) {
           // Store time as decimal hours (hours + minutes/60) for easier comparison
           availability.push({
             startDay: startDayName,
@@ -294,6 +323,11 @@ function parseDriverAvailability(availabilityString) {
             endDay: endDayName,
             endTime: endHour + (endMinute / 60)
           });
+        } else {
+          // Log skipped slots for debugging
+          if (startDayName && endDayName && startDayName !== endDayName) {
+            console.log(`Skipping availability slot: ${startDayName} ${startHour}:${startMinute} to ${endDayName} ${endHour}:${endMinute} (different days)`);
+          }
         }
       }
     }
@@ -333,18 +367,61 @@ function calculateRideTimeframe(ride) {
     }
   }
   
-  // Fallback to old schema for backward compatibility (Firestore timestamps)
-  const pickupTimeField = ride.pickupTme || ride.pickupTime || ride.PickupTime;
+  // Handle case where appointmentTime is already a Date/timestamp
+  // Prioritize timestamp fields over string fields
   const appointmentTimeField = ride.appointmentTime || ride.AppointmentTime;
+  // Check timestamp fields first (pickupTime, PickupTime), then string field (pickupTme)
+  const pickupTimeField = ride.pickupTime || ride.PickupTime || ride.pickupTme;
   
-  if (pickupTimeField && appointmentTimeField) {
-    // Check if these are timestamps (old format)
-    const pickupTime = convertFirestoreTimestamp(pickupTimeField);
-    const appointmentTime = convertFirestoreTimestamp(appointmentTimeField);
-    
-    if (pickupTime && appointmentTime) {
-      return calculateTimeframeFromTimestamps(pickupTime, appointmentTime, estimatedDuration, tripType);
+  // Convert appointmentTime to Date object if it exists
+  let appointmentTime = null;
+  if (appointmentTimeField) {
+    appointmentTime = convertFirestoreTimestamp(appointmentTimeField);
+  }
+  
+  // Convert pickupTime to Date object if it exists
+  // Only use timestamp fields, ignore string fields (they're handled above)
+  let pickupTime = null;
+  if (pickupTimeField) {
+    // Only convert if it's a timestamp (Date object or Firestore timestamp), not a string
+    if (pickupTimeField instanceof Date || (pickupTimeField && typeof pickupTimeField === 'object' && pickupTimeField.toDate)) {
+      pickupTime = convertFirestoreTimestamp(pickupTimeField);
+      
+      // Validate pickupTime is before appointmentTime
+      // If pickupTime is after appointmentTime, it's invalid - recalculate
+      if (pickupTime && appointmentTime && pickupTime >= appointmentTime) {
+        console.warn('Invalid pickup time (after appointment time), recalculating:', {
+          pickupTime: pickupTime,
+          appointmentTime: appointmentTime
+        });
+        pickupTime = null; // Reset to recalculate
+      }
+    } else if (typeof pickupTimeField === 'string') {
+      // If it's a string, it's the old format (pickupTme), skip it - we'll calculate default
+      console.log('Skipping string pickup time field, will calculate default');
+      pickupTime = null;
     }
+  }
+  
+  // If we have appointmentTime but no pickupTime, calculate default pickup time
+  // Default: 25 minutes before appointment (allows travel time)
+  if (appointmentTime && !pickupTime && estimatedDuration && tripType) {
+    pickupTime = new Date(appointmentTime.getTime() - (25 * 60 * 1000)); // 25 minutes before
+    console.log('Pickup time not provided or invalid, using default 25 minutes before appointment:', pickupTime);
+  }
+  
+  // If we have both times, calculate the timeframe
+  if (pickupTime && appointmentTime && estimatedDuration && tripType) {
+    return calculateTimeframeFromTimestamps(pickupTime, appointmentTime, estimatedDuration, tripType);
+  }
+  
+  // If we only have appointmentTime but missing required fields, log error
+  if (appointmentTime && (!estimatedDuration || !tripType)) {
+    console.error('Missing required fields for ride timeframe calculation:', {
+      hasAppointmentTime: !!appointmentTime,
+      estimatedDuration: estimatedDuration,
+      tripType: tripType
+    });
   }
   
   return null;
@@ -425,23 +502,85 @@ function isVolunteerAvailableForTimeframe(volunteer, rideTimeframe) {
   const availability = parseDriverAvailability(volunteer.driver_availability_by_day_and_time);
   
   // Get the day of the week for the ride
+  // The database timestamps represent local time values directly
+  // Use the time components as-is without timezone conversion
+  // Example: If DB shows "10:30 AM", extract 10:30 directly from the timestamp
   const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  const rideDay = dayNames[rideTimeframe.startTime.getDay()];
-  // Convert ride times to decimal hours (hours + minutes/60) for comparison with parsed availability
-  const rideStartTime = rideTimeframe.startTime.getHours() + (rideTimeframe.startTime.getMinutes() / 60);
-  const rideEndTime = rideTimeframe.endTime.getHours() + (rideTimeframe.endTime.getMinutes() / 60);
+  
+  // Extract time components directly from the timestamp
+  // The timestamp already represents the local time, so we use getHours() and getMinutes()
+  // which will give us the local time components based on the server's timezone
+  // OR we manually extract from UTC if the timestamp is stored in UTC but represents local time
+  // Since DB shows "10:30 AM UTC-5" and Firestore stores as "15:30 UTC", we need to convert back
+  const utcStartHour = rideTimeframe.startTime.getUTCHours();
+  const utcStartMinute = rideTimeframe.startTime.getUTCMinutes();
+  const utcEndHour = rideTimeframe.endTime.getUTCHours();
+  const utcEndMinute = rideTimeframe.endTime.getUTCMinutes();
+  
+  // Database stores local time as UTC, so convert back: UTC hour - offset = local hour
+  // For UTC-5 (EST): if UTC is 15:30, local is 15:30 - 5 = 10:30
+  const utcOffsetHours = 5; // Hours to subtract (EST is UTC-5)
+  let localStartHour = utcStartHour - utcOffsetHours;
+  let localEndHour = utcEndHour - utcOffsetHours;
+  
+  // Handle hour rollover
+  if (localStartHour < 0) localStartHour += 24;
+  if (localStartHour >= 24) localStartHour -= 24;
+  if (localEndHour < 0) localEndHour += 24;
+  if (localEndHour >= 24) localEndHour -= 24;
+  
+  // Get day of week - use UTC day and adjust if needed for day boundary
+  let rideDayIndex = rideTimeframe.startTime.getUTCDay();
+  const adjustedStartHour = utcStartHour - utcOffsetHours;
+  if (adjustedStartHour < 0) {
+    rideDayIndex = (rideDayIndex - 1 + 7) % 7; // Previous day
+  } else if (adjustedStartHour >= 24) {
+    rideDayIndex = (rideDayIndex + 1) % 7; // Next day
+  }
+  const rideDay = dayNames[rideDayIndex];
+  
+  // Convert to decimal hours (hours + minutes/60) - these should directly reflect DB times
+  // Example: 10:30 AM = 10.50, 10:00 AM = 10.00
+  const rideStartTime = localStartHour + (utcStartMinute / 60);
+  const rideEndTime = localEndHour + (utcEndMinute / 60);
+  
+  // Debug logging
+  console.log('Checking availability:', {
+    volunteer: volunteer.first_name + ' ' + volunteer.last_name,
+    rideDay,
+    rideStartTime: rideStartTime.toFixed(2),
+    rideEndTime: rideEndTime.toFixed(2),
+    availabilitySlots: availability.length,
+    parsedSlots: availability.map(s => `${s.startDay} ${s.startTime.toFixed(2)}-${s.endTime.toFixed(2)}`)
+  });
   
   // Check if the volunteer is available on the ride day
+  if (availability.length === 0) {
+    console.log(`No availability slots parsed for ${volunteer.first_name} ${volunteer.last_name}`);
+    return false;
+  }
+  
+  let foundMatchingDay = false;
   for (const slot of availability) {
     if (slot.startDay === rideDay) {
+      foundMatchingDay = true;
+      console.log(`Checking slot: ${slot.startDay} ${slot.startTime.toFixed(2)}-${slot.endTime.toFixed(2)}`);
       // Check if the entire ride timeframe falls within the volunteer's availability
       // We need the volunteer to be available from start to end of the ride
       if (rideStartTime >= slot.startTime && rideEndTime <= slot.endTime) {
+        console.log(`✓ MATCH FOUND for ${volunteer.first_name} ${volunteer.last_name}: ride ${rideStartTime.toFixed(2)}-${rideEndTime.toFixed(2)} fits in ${slot.startTime.toFixed(2)}-${slot.endTime.toFixed(2)}`);
         return true;
+      } else {
+        console.log(`✗ No match: ride ${rideStartTime.toFixed(2)}-${rideEndTime.toFixed(2)} not within slot ${slot.startTime.toFixed(2)}-${slot.endTime.toFixed(2)}`);
+        console.log(`  Details: rideStartTime (${rideStartTime.toFixed(2)}) >= slot.startTime (${slot.startTime.toFixed(2)}) = ${rideStartTime >= slot.startTime}`);
+        console.log(`           rideEndTime (${rideEndTime.toFixed(2)}) <= slot.endTime (${slot.endTime.toFixed(2)}) = ${rideEndTime <= slot.endTime}`);
       }
     }
   }
   
+  if (!foundMatchingDay) {
+    console.log(`No slots found for ${rideDay} (available days: ${[...new Set(availability.map(s => s.startDay))].join(', ')})`);
+  }
   return false;
 }
 
@@ -526,7 +665,47 @@ async function matchDriversForRide(rideId) {
       // Your volunteer documents don't have VOLUNTEER POSITION field, so we'll assume all are drivers
       // Check status case-insensitively (Active, active, ACTIVE, etc.)
       const status = volunteer.volunteering_status ? volunteer.volunteering_status.toLowerCase() : '';
-      if (status === 'active') {
+      
+      // Check if volunteer is on leave and if the leave period has ended
+      let isOnLeave = false;
+      if (status.includes('leave')) {
+        // Extract date from status like "on leave until 09/25/2025"
+        const dateMatch = status.match(/(\d{1,2}\/\d{1,2}\/\d{4})/);
+        if (dateMatch) {
+          const leaveEndDate = new Date(dateMatch[1]);
+          const rideDate = rideTimeframe ? rideTimeframe.startTime : null;
+          // If ride date is after leave end date, volunteer is available
+          isOnLeave = rideDate && rideDate <= leaveEndDate;
+        } else {
+          // If status contains "leave" but no date, assume currently on leave
+          isOnLeave = true;
+        }
+      }
+      
+      const isActive = status === 'active' || (!status.includes('leave') && !status.includes('inactive'));
+      
+      // Include active volunteers who are not on leave (or whose leave has ended)
+      if (isActive && !isOnLeave) {
+        // Check wheelchair requirement if ride requires wheelchair
+        const rideRequiresWheelchair = ride.wheelchair === true;
+        const volunteerCanHandleWheelchair = volunteer.wheelchair === true; // Default to false if field doesn't exist
+        
+        // If ride requires wheelchair but volunteer cannot handle it, skip this volunteer
+        if (rideRequiresWheelchair && !volunteerCanHandleWheelchair) {
+          unavailable.push({
+            id: volunteer.id,
+            name: `${volunteer.first_name} ${volunteer.last_name}`,
+            email: volunteer.email_address,
+            phone: volunteer.primary_phone,
+            vehicle: volunteer.type_of_vehicle,
+            maxRidesPerWeek: volunteer.max_rides_week,
+            availability: volunteer.driver_availability_by_day_and_time,
+            reason: 'Ride requires wheelchair capability'
+          });
+          continue; // Skip to next volunteer
+        }
+        
+        // Check availability for timeframe
         if (isVolunteerAvailableForTimeframe(volunteer, rideTimeframe)) {
           available.push({
             id: volunteer.id,
@@ -535,7 +714,8 @@ async function matchDriversForRide(rideId) {
             phone: volunteer.primary_phone,
             vehicle: volunteer.type_of_vehicle,
             maxRidesPerWeek: volunteer.max_rides_week,
-            availability: volunteer.driver_availability_by_day_and_time
+            availability: volunteer.driver_availability_by_day_and_time,
+            wheelchairCapable: volunteerCanHandleWheelchair
           });
         } else {
           unavailable.push({
@@ -667,6 +847,24 @@ async function matchDriversForRideByUID(uid) {
       // Check status case-insensitively (Active, active, ACTIVE, etc.)
       const status = volunteer.volunteering_status ? volunteer.volunteering_status.toLowerCase() : '';
       if (status === 'active') {
+        // Check wheelchair requirement if ride requires wheelchair
+        const rideRequiresWheelchair = ride.wheelchair === true;
+        const volunteerCanHandleWheelchair = volunteer.wheelchair === true; // Default to false if field doesn't exist
+        
+        // If ride requires wheelchair but volunteer cannot handle it, skip this volunteer
+        if (rideRequiresWheelchair && !volunteerCanHandleWheelchair) {
+          unavailable.push({
+            id: volunteer.id,
+            name: `${volunteer.first_name} ${volunteer.last_name}`,
+            email: volunteer.email_address,
+            phone: volunteer.primary_phone,
+            vehicle: volunteer.type_of_vehicle,
+            reason: 'Ride requires wheelchair capability'
+          });
+          continue; // Skip to next volunteer
+        }
+        
+        // Check availability for timeframe
         if (isVolunteerAvailableForTimeframe(volunteer, rideTimeframe)) {
           available.push({
             id: volunteer.id,
@@ -674,6 +872,7 @@ async function matchDriversForRideByUID(uid) {
             email: volunteer.email_address,
             phone: volunteer.primary_phone,
             vehicle: volunteer.type_of_vehicle,
+            wheelchairCapable: volunteerCanHandleWheelchair
           });
         } else {
           unavailable.push({
