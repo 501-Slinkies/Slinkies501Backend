@@ -7,6 +7,7 @@ const applicationLayer = require('./ApplicationLayer');
 const calendarRoutes = require("./calendar");
 const ridesRouter = require("./routes/rides");
 const clientsRouter = require("./routes/clients");  
+const volunteersRouter = require("./routes/volunteers");
 const { verifyAddress, getRoute } = require("./integrations/maps");
 const { sendNotification } = require("./services/notifications");
 const reportsRouter = require("./routes/reports");
@@ -42,6 +43,7 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(bodyParser.json()); 
 
+app.use("/api/volunteers", volunteersRouter);
 // ================================
 // Login Endpoint
 // ================================

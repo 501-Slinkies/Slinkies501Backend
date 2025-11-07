@@ -164,6 +164,9 @@ function parseDayAbbreviation(dayAbbr) {
 }
 
 // Helper function to convert Firestore timestamp to Date
+const DEFAULT_UTC_OFFSET_HOURS = 5; // EST offset (UTC-5)
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
 function convertFirestoreTimestamp(timestamp) {
   if (!timestamp) {
     return null;
@@ -195,6 +198,666 @@ function convertFirestoreTimestamp(timestamp) {
   }
   
   return null;
+}
+
+function parseUnavailabilityDateTimeSegment(segment) {
+  if (!segment || typeof segment !== 'string') {
+    return null;
+  }
+
+  const parts = segment.split(',').map(part => part.trim()).filter(part => part !== '');
+  if (parts.length < 4) {
+    return null;
+  }
+
+  const day = parseInt(parts[0], 10);
+  const month = parseInt(parts[1], 10);
+  const year = parseInt(parts[2], 10);
+  const timeToken = parts.slice(3).join(',');
+
+  const timeMatch = timeToken.match(/^(\d{1,2}):(\d{2})$/);
+  if (!timeMatch) {
+    return null;
+  }
+
+  const hour = parseInt(timeMatch[1], 10);
+  const minute = parseInt(timeMatch[2], 10);
+
+  if (
+    isNaN(day) || isNaN(month) || isNaN(year) ||
+    isNaN(hour) || isNaN(minute) ||
+    day < 1 || day > 31 ||
+    month < 1 || month > 12 ||
+    hour < 0 || hour > 23 ||
+    minute < 0 || minute > 59
+  ) {
+    return null;
+  }
+
+  const dateTime = new Date(year, month - 1, day, hour, minute, 0, 0);
+  if (isNaN(dateTime.getTime())) {
+    return null;
+  }
+
+  return dateTime;
+}
+
+function parseVolunteerUnavailabilityRange(rangeStr) {
+  if (!rangeStr || typeof rangeStr !== 'string') {
+    return { success: false, message: 'Unavailability entry must be a string' };
+  }
+
+  const segments = rangeStr.split(';').map(segment => segment.trim()).filter(segment => segment !== '');
+  if (segments.length !== 2) {
+    return { success: false, message: 'Unavailability entry must contain exactly two date-time values separated by a semicolon' };
+  }
+
+  const start = parseUnavailabilityDateTimeSegment(segments[0]);
+  const end = parseUnavailabilityDateTimeSegment(segments[1]);
+
+  if (!start || !end) {
+    return { success: false, message: 'Unable to parse start or end date-time value. Expected format: DD,MM,YYYY,HH:MM;DD,MM,YYYY,HH:MM' };
+  }
+
+  if (end <= start) {
+    return { success: false, message: 'Unavailability end time must be after start time' };
+  }
+
+  return {
+    success: true,
+    start,
+    end
+  };
+}
+
+function normalizeWeekday(weekdayStr) {
+  if (!weekdayStr || typeof weekdayStr !== 'string') {
+    return null;
+  }
+
+  const normalized = weekdayStr.trim().toLowerCase();
+  const weekdayMap = {
+    'sunday': 'Sunday',
+    'sun': 'Sunday',
+    'su': 'Sunday',
+    '0': 'Sunday',
+    '7': 'Sunday',
+    'monday': 'Monday',
+    'mon': 'Monday',
+    'm': 'Monday',
+    '1': 'Monday',
+    'tuesday': 'Tuesday',
+    'tues': 'Tuesday',
+    'tue': 'Tuesday',
+    't': 'Tuesday',
+    '2': 'Tuesday',
+    'wednesday': 'Wednesday',
+    'wed': 'Wednesday',
+    'w': 'Wednesday',
+    '3': 'Wednesday',
+    'thursday': 'Thursday',
+    'thu': 'Thursday',
+    'thur': 'Thursday',
+    'thurs': 'Thursday',
+    'th': 'Thursday',
+    '4': 'Thursday',
+    'friday': 'Friday',
+    'fri': 'Friday',
+    'f': 'Friday',
+    '5': 'Friday',
+    'saturday': 'Saturday',
+    'sat': 'Saturday',
+    'sa': 'Saturday',
+    's': 'Saturday',
+    '6': 'Saturday'
+  };
+
+  return weekdayMap[normalized] || null;
+}
+
+function parseTwentyFourHourTime(timeStr) {
+  if (!timeStr || typeof timeStr !== 'string') {
+    return null;
+  }
+
+  const normalized = timeStr.trim();
+  const match = normalized.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) {
+    return null;
+  }
+
+  const hour = parseInt(match[1], 10);
+  const minute = parseInt(match[2], 10);
+
+  if (
+    isNaN(hour) || isNaN(minute) ||
+    hour < 0 || hour > 23 ||
+    minute < 0 || minute > 59
+  ) {
+    return null;
+  }
+
+  return {
+    hour,
+    minute,
+    minutesTotal: hour * 60 + minute
+  };
+}
+
+function formatMinutesToTime(minutes) {
+  if (typeof minutes !== 'number' || !isFinite(minutes)) {
+    return '';
+  }
+  const normalized = ((Math.floor(minutes) % 1440) + 1440) % 1440;
+  const hour = Math.floor(normalized / 60);
+  const minute = Math.floor(normalized % 60);
+  return `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
+}
+
+function formatDateISO(date) {
+  if (!(date instanceof Date) || isNaN(date.getTime())) {
+    return '';
+  }
+  return date.toISOString().split('T')[0];
+}
+
+function parseUnavailabilityStringToSlots(unavailabilityString) {
+  if (!unavailabilityString || typeof unavailabilityString !== 'string') {
+    return [];
+  }
+
+  const slots = parseDriverAvailability(unavailabilityString);
+  if (!Array.isArray(slots) || slots.length === 0) {
+    return [];
+  }
+
+  const parsedSlots = [];
+  for (const slot of slots) {
+    if (!slot || typeof slot !== 'object') {
+      continue;
+    }
+
+    const weekday = slot.startDay;
+    const startMinutes = typeof slot.startTime === 'number' ? Math.round(slot.startTime * 60) : null;
+    const endMinutes = typeof slot.endTime === 'number' ? Math.round(slot.endTime * 60) : null;
+
+    if (
+      !weekday ||
+      startMinutes === null ||
+      endMinutes === null ||
+      endMinutes <= startMinutes
+    ) {
+      continue;
+    }
+
+    parsedSlots.push({
+      weekday,
+      startMinutes,
+      endMinutes,
+      startHour: Math.floor(startMinutes / 60),
+      startMinute: startMinutes % 60,
+      endHour: Math.floor(endMinutes / 60),
+      endMinute: endMinutes % 60
+    });
+  }
+
+  return parsedSlots;
+}
+
+function clampDateToStartOfDay(date) {
+  if (!(date instanceof Date) || isNaN(date.getTime())) {
+    return null;
+  }
+  const cloned = new Date(date);
+  cloned.setHours(0, 0, 0, 0);
+  return cloned;
+}
+
+function parseEffectiveDate(dateInput) {
+  if (!dateInput) {
+    return null;
+  }
+
+  if (dateInput instanceof Date) {
+    const normalized = clampDateToStartOfDay(dateInput);
+    return normalized && !isNaN(normalized.getTime()) ? normalized : null;
+  }
+
+  if (typeof dateInput === 'string') {
+    const trimmed = dateInput.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    let parsed = parseDateString(trimmed);
+    if (!parsed) {
+      const isoParsed = new Date(trimmed);
+      parsed = isNaN(isoParsed.getTime()) ? null : isoParsed;
+    }
+
+    return parsed ? clampDateToStartOfDay(parsed) : null;
+  }
+
+  if (typeof dateInput === 'number' && isFinite(dateInput)) {
+    const parsed = new Date(dateInput);
+    return clampDateToStartOfDay(parsed);
+  }
+
+  return null;
+}
+
+function normalizeDateInput(dateInput) {
+  if (dateInput === null || dateInput === undefined) {
+    return null;
+  }
+
+  const timestampDate = convertFirestoreTimestamp(dateInput);
+  if (timestampDate) {
+    return clampDateToStartOfDay(timestampDate);
+  }
+
+  if (dateInput instanceof Date) {
+    return clampDateToStartOfDay(dateInput);
+  }
+
+  if (typeof dateInput === 'string') {
+    const trimmed = dateInput.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    const isoParsed = new Date(trimmed);
+    if (!isNaN(isoParsed.getTime())) {
+      return clampDateToStartOfDay(isoParsed);
+    }
+
+    const fallback = parseDateString(trimmed);
+    if (fallback) {
+      return clampDateToStartOfDay(fallback);
+    }
+  }
+
+  if (typeof dateInput === 'number' && isFinite(dateInput)) {
+    const parsed = new Date(dateInput);
+    return clampDateToStartOfDay(parsed);
+  }
+
+  return null;
+}
+
+function buildVolunteerUnavailabilityIndex(volunteer) {
+  const singles = [];
+  const recurring = [];
+
+  if (!volunteer || typeof volunteer !== 'object') {
+    return { singles, recurring };
+  }
+
+  const unavailabilityEntries = Array.isArray(volunteer.unavailability)
+    ? volunteer.unavailability
+    : [];
+
+  for (const entry of unavailabilityEntries) {
+    if (!entry || typeof entry !== 'object') {
+      continue;
+    }
+
+    // Legacy single-entry format with explicit start/end
+    if (entry.start || entry.end) {
+      const start = convertFirestoreTimestamp(entry.start || entry.startTime || entry.begin);
+      const end = convertFirestoreTimestamp(entry.end || entry.endTime || entry.finish);
+      if (start instanceof Date && end instanceof Date && start < end) {
+        singles.push({ start, end, source: entry.source || 'legacy_single' });
+      }
+      continue;
+    }
+
+    const unavailabilityString = typeof entry.unavailabilityString === 'string'
+      ? entry.unavailabilityString
+      : typeof entry.unavailability_string === 'string'
+        ? entry.unavailability_string
+        : null;
+
+    if (!unavailabilityString) {
+      continue;
+    }
+
+    const slots = parseUnavailabilityStringToSlots(unavailabilityString);
+    if (slots.length === 0) {
+      continue;
+    }
+
+    const repeated = entry.repeated === true;
+    const effectiveFrom = normalizeDateInput(entry.effectiveFrom ?? entry.effective_from ?? entry.startDate);
+    const effectiveToInput = normalizeDateInput(entry.effectiveTo ?? entry.effective_to ?? entry.endDate);
+    const effectiveTo = effectiveToInput || effectiveFrom;
+
+    if (repeated) {
+      for (const slot of slots) {
+        recurring.push({
+          weekday: slot.weekday,
+          startMinutes: slot.startMinutes,
+          endMinutes: slot.endMinutes,
+          effectiveFrom,
+          effectiveTo,
+          source: entry.source || 'recurring_unavailability'
+        });
+      }
+    } else {
+      if (!effectiveFrom) {
+        // Cannot expand non-recurring entry without a start date
+        continue;
+      }
+
+      const rangeStart = effectiveFrom;
+      const rangeEnd = effectiveTo && effectiveTo >= rangeStart ? effectiveTo : rangeStart;
+
+      for (let current = new Date(rangeStart); current <= rangeEnd; current.setDate(current.getDate() + 1)) {
+        const currentDayName = DAY_NAMES[current.getDay()];
+
+        for (const slot of slots) {
+          if (slot.weekday !== currentDayName) {
+            continue;
+          }
+
+          const start = new Date(current);
+          start.setHours(slot.startHour, slot.startMinute, 0, 0);
+
+          const end = new Date(current);
+          end.setHours(slot.endHour, slot.endMinute, 0, 0);
+
+          if (start < end) {
+            singles.push({
+              start,
+              end,
+              source: entry.source || 'single_unavailability'
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // Legacy recurring array support
+  const legacyRecurring = Array.isArray(volunteer.recurringUnavailability)
+    ? volunteer.recurringUnavailability
+    : [];
+
+  for (const entry of legacyRecurring) {
+    if (!entry || typeof entry !== 'object') {
+      continue;
+    }
+
+    const weekday = normalizeWeekday(entry.weekday || entry.day || entry.dayOfWeek);
+    let startMinutes = typeof entry.startMinutes === 'number' ? entry.startMinutes : null;
+    let endMinutes = typeof entry.endMinutes === 'number' ? entry.endMinutes : null;
+
+    if ((startMinutes === null || endMinutes === null) && typeof entry.startTime === 'number' && typeof entry.endTime === 'number') {
+      startMinutes = Math.round(entry.startTime * 60);
+      endMinutes = Math.round(entry.endTime * 60);
+    }
+
+    if (
+      !weekday ||
+      startMinutes === null ||
+      endMinutes === null ||
+      endMinutes <= startMinutes
+    ) {
+      continue;
+    }
+
+    recurring.push({
+      weekday,
+      startMinutes,
+      endMinutes,
+      effectiveFrom: normalizeDateInput(entry.effectiveFrom ?? entry.effective_from ?? entry.startDate),
+      effectiveTo: normalizeDateInput(entry.effectiveTo ?? entry.effective_to ?? entry.endDate),
+      source: entry.source || 'legacy_recurring'
+    });
+  }
+
+  return { singles, recurring };
+}
+
+function parseRecurringUnavailabilityEntry(entry) {
+  if (!entry || typeof entry !== 'object') {
+    return {
+      success: false,
+      message: 'Recurring unavailability entry must be an object'
+    };
+  }
+
+  const weekdayInput = entry.weekday || entry.day || entry.dayOfWeek;
+  const weekday = normalizeWeekday(weekdayInput);
+  if (!weekday) {
+    return {
+      success: false,
+      message: 'Recurring unavailability requires a valid weekday'
+    };
+  }
+
+  const startInput = entry.start || entry.startTime;
+  const endInput = entry.end || entry.endTime;
+  const parsedStart = parseTwentyFourHourTime(startInput);
+  const parsedEnd = parseTwentyFourHourTime(endInput);
+
+  if (!parsedStart || !parsedEnd) {
+    return {
+      success: false,
+      message: 'Recurring unavailability requires start and end times in HH:MM 24-hour format'
+    };
+  }
+
+  if (parsedEnd.minutesTotal <= parsedStart.minutesTotal) {
+    return {
+      success: false,
+      message: 'Recurring unavailability end time must be after start time'
+    };
+  }
+
+  const effectiveFrom = parseEffectiveDate(entry.effectiveFrom || entry.effective_from || entry.startDate);
+  const effectiveTo = parseEffectiveDate(entry.effectiveTo || entry.effective_to || entry.endDate);
+
+  if (effectiveFrom && effectiveTo && effectiveTo < effectiveFrom) {
+    return {
+      success: false,
+      message: 'Recurring unavailability effectiveTo date must be on or after effectiveFrom date'
+    };
+  }
+
+  return {
+    success: true,
+    entry: {
+      weekday,
+      startMinutes: parsedStart.minutesTotal,
+      endMinutes: parsedEnd.minutesTotal,
+      effectiveFrom,
+      effectiveTo,
+      source: entry.source || 'volunteer_api_recurring'
+    }
+  };
+}
+
+function getVolunteerUnavailabilityConflict(volunteer, rideTimeframe) {
+  if (!rideTimeframe || !(rideTimeframe.startTime instanceof Date) || !(rideTimeframe.endTime instanceof Date)) {
+    return null;
+  }
+
+  const { singles } = buildVolunteerUnavailabilityIndex(volunteer);
+  if (singles.length === 0) {
+    return null;
+  }
+
+  const rideStart = rideTimeframe.startTime;
+  const rideEnd = rideTimeframe.endTime;
+
+  for (const entry of singles) {
+    if (rideStart < entry.end && rideEnd > entry.start) {
+      return { start: entry.start, end: entry.end };
+    }
+  }
+
+  return null;
+}
+
+function getLocalRideWindow(rideTimeframe) {
+  if (
+    !rideTimeframe ||
+    !(rideTimeframe.startTime instanceof Date) ||
+    !(rideTimeframe.endTime instanceof Date)
+  ) {
+    return null;
+  }
+
+  const dayNames = DAY_NAMES;
+
+  const utcStartMinutes = rideTimeframe.startTime.getUTCHours() * 60 + rideTimeframe.startTime.getUTCMinutes();
+  const utcEndMinutes = rideTimeframe.endTime.getUTCHours() * 60 + rideTimeframe.endTime.getUTCMinutes();
+
+  let localStartMinutes = utcStartMinutes - DEFAULT_UTC_OFFSET_HOURS * 60;
+  let localEndMinutes = utcEndMinutes - DEFAULT_UTC_OFFSET_HOURS * 60;
+
+  // Adjust for wrap-around
+  while (localStartMinutes < 0) {
+    localStartMinutes += 1440;
+  }
+  while (localStartMinutes >= 1440) {
+    localStartMinutes -= 1440;
+  }
+  while (localEndMinutes < 0) {
+    localEndMinutes += 1440;
+  }
+  while (localEndMinutes >= 1440) {
+    localEndMinutes -= 1440;
+  }
+
+  let rideDayIndex = rideTimeframe.startTime.getUTCDay();
+  const adjustedStartHour = rideTimeframe.startTime.getUTCHours() - DEFAULT_UTC_OFFSET_HOURS;
+  if (adjustedStartHour < 0) {
+    rideDayIndex = (rideDayIndex - 1 + 7) % 7;
+  } else if (adjustedStartHour >= 24) {
+    rideDayIndex = (rideDayIndex + 1) % 7;
+  }
+  const rideDay = dayNames[rideDayIndex];
+
+  return {
+    rideDay,
+    rideStartDecimal: localStartMinutes / 60,
+    rideEndDecimal: localEndMinutes / 60,
+    rideStartMinutes: localStartMinutes,
+    rideEndMinutes: localEndMinutes
+  };
+}
+
+function getVolunteerRecurringUnavailabilityConflict(volunteer, rideTimeframe) {
+  if (!rideTimeframe || !(rideTimeframe.startTime instanceof Date) || !(rideTimeframe.endTime instanceof Date)) {
+    return null;
+  }
+
+  const { recurring } = buildVolunteerUnavailabilityIndex(volunteer);
+  if (recurring.length === 0) {
+    return null;
+  }
+
+  const localWindow = getLocalRideWindow(rideTimeframe);
+  if (!localWindow) {
+    return null;
+  }
+
+  const rideDate = clampDateToStartOfDay(rideTimeframe.startTime);
+  for (const entry of recurring) {
+    if (entry.weekday !== localWindow.rideDay) {
+      continue;
+    }
+
+    const effectiveFrom = entry.effectiveFrom ? clampDateToStartOfDay(entry.effectiveFrom) : null;
+    const effectiveTo = entry.effectiveTo ? clampDateToStartOfDay(entry.effectiveTo) : null;
+
+    if (effectiveFrom && rideDate && rideDate < effectiveFrom) {
+      continue;
+    }
+    if (effectiveTo && rideDate && rideDate > effectiveTo) {
+      continue;
+    }
+
+    if (localWindow.rideStartMinutes < entry.endMinutes && localWindow.rideEndMinutes > entry.startMinutes) {
+      return {
+        type: 'recurring',
+        weekday: entry.weekday,
+        startMinutes: entry.startMinutes,
+        endMinutes: entry.endMinutes,
+        effectiveFrom: effectiveFrom ? clampDateToStartOfDay(effectiveFrom) : null,
+        effectiveTo: effectiveTo ? clampDateToStartOfDay(effectiveTo) : null
+      };
+    }
+  }
+
+  return null;
+}
+
+function getVolunteerAvailabilityConflict(volunteer, rideTimeframe) {
+  if (!rideTimeframe || !(rideTimeframe.startTime instanceof Date) || !(rideTimeframe.endTime instanceof Date)) {
+    return null;
+  }
+
+  const { singles, recurring } = buildVolunteerUnavailabilityIndex(volunteer);
+
+  if (singles.length > 0) {
+    const rideStart = rideTimeframe.startTime;
+    const rideEnd = rideTimeframe.endTime;
+
+    for (const entry of singles) {
+      if (rideStart < entry.end && rideEnd > entry.start) {
+        return {
+          type: 'single',
+          start: entry.start,
+          end: entry.end
+        };
+      }
+    }
+  }
+
+  if (recurring.length > 0) {
+    const localWindow = getLocalRideWindow(rideTimeframe);
+    if (!localWindow) {
+      return null;
+    }
+
+    const rideDate = clampDateToStartOfDay(rideTimeframe.startTime);
+
+    for (const entry of recurring) {
+      const effectiveFrom = entry.effectiveFrom ? clampDateToStartOfDay(entry.effectiveFrom) : null;
+      const effectiveTo = entry.effectiveTo ? clampDateToStartOfDay(entry.effectiveTo) : null;
+
+      if (effectiveFrom && rideDate && rideDate < effectiveFrom) {
+        continue;
+      }
+      if (effectiveTo && rideDate && rideDate > effectiveTo) {
+        continue;
+      }
+
+      if (
+        entry.weekday === localWindow.rideDay &&
+        localWindow.rideStartMinutes < entry.endMinutes &&
+        localWindow.rideEndMinutes > entry.startMinutes
+      ) {
+        return {
+          type: 'recurring',
+          weekday: entry.weekday,
+          startMinutes: entry.startMinutes,
+          endMinutes: entry.endMinutes,
+          effectiveFrom,
+          effectiveTo
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
+function hasUnavailabilityConflict(volunteer, rideTimeframe) {
+  return !!getVolunteerAvailabilityConflict(volunteer, rideTimeframe);
 }
 
 // Helper function to parse date string (format: '9/15/2025' or 'M/D/YYYY')
@@ -474,7 +1137,7 @@ function parseRideDateTime(rideDate, rideTime) {
   
   // Parse the date to get the day of the week
   const date = new Date(rideDate);
-  const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const dayNames = DAY_NAMES;
   const dayName = dayNames[date.getDay()];
   
   // Parse time (assuming format like "09:00" or "9:00")
@@ -627,12 +1290,17 @@ function matchesClientVolunteerCriteria(client, volunteer) {
 // Checks if any role in the volunteer's roles array contains "driver" (case-insensitive)
 // Supports variants like: "driver", "default_driver", "pen_driver", "fish_rush_driver", etc.
 function isDriverRole(volunteer) {
-  if (!volunteer || !volunteer.roles) {
+  if (!volunteer) {
     return false;
   }
-  
+
+  const rawRoles = volunteer.roles ?? volunteer.role ?? volunteer.role_name ?? null;
+  if (!rawRoles) {
+    return false;
+  }
+
   // Handle both array and string formats
-  const roles = Array.isArray(volunteer.roles) ? volunteer.roles : [volunteer.roles];
+  const roles = Array.isArray(rawRoles) ? rawRoles : [rawRoles];
   
   // Check if any role contains "driver" (case-insensitive)
   return roles.some(role => {
@@ -650,56 +1318,18 @@ function isVolunteerAvailableForTimeframe(volunteer, rideTimeframe) {
   }
   
   const availability = parseDriverAvailability(volunteer.driver_availability_by_day_and_time);
-  
-  // Get the day of the week for the ride
-  // The database timestamps represent local time values directly
-  // Use the time components as-is without timezone conversion
-  // Example: If DB shows "10:30 AM", extract 10:30 directly from the timestamp
-  const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  
-  // Extract time components directly from the timestamp
-  // The timestamp already represents the local time, so we use getHours() and getMinutes()
-  // which will give us the local time components based on the server's timezone
-  // OR we manually extract from UTC if the timestamp is stored in UTC but represents local time
-  // Since DB shows "10:30 AM UTC-5" and Firestore stores as "15:30 UTC", we need to convert back
-  const utcStartHour = rideTimeframe.startTime.getUTCHours();
-  const utcStartMinute = rideTimeframe.startTime.getUTCMinutes();
-  const utcEndHour = rideTimeframe.endTime.getUTCHours();
-  const utcEndMinute = rideTimeframe.endTime.getUTCMinutes();
-  
-  // Database stores local time as UTC, so convert back: UTC hour - offset = local hour
-  // For UTC-5 (EST): if UTC is 15:30, local is 15:30 - 5 = 10:30
-  const utcOffsetHours = 5; // Hours to subtract (EST is UTC-5)
-  let localStartHour = utcStartHour - utcOffsetHours;
-  let localEndHour = utcEndHour - utcOffsetHours;
-  
-  // Handle hour rollover
-  if (localStartHour < 0) localStartHour += 24;
-  if (localStartHour >= 24) localStartHour -= 24;
-  if (localEndHour < 0) localEndHour += 24;
-  if (localEndHour >= 24) localEndHour -= 24;
-  
-  // Get day of week - use UTC day and adjust if needed for day boundary
-  let rideDayIndex = rideTimeframe.startTime.getUTCDay();
-  const adjustedStartHour = utcStartHour - utcOffsetHours;
-  if (adjustedStartHour < 0) {
-    rideDayIndex = (rideDayIndex - 1 + 7) % 7; // Previous day
-  } else if (adjustedStartHour >= 24) {
-    rideDayIndex = (rideDayIndex + 1) % 7; // Next day
+
+  const localWindow = getLocalRideWindow(rideTimeframe);
+  if (!localWindow) {
+    return false;
   }
-  const rideDay = dayNames[rideDayIndex];
-  
-  // Convert to decimal hours (hours + minutes/60) - these should directly reflect DB times
-  // Example: 10:30 AM = 10.50, 10:00 AM = 10.00
-  const rideStartTime = localStartHour + (utcStartMinute / 60);
-  const rideEndTime = localEndHour + (utcEndMinute / 60);
   
   // Debug logging
   console.log('Checking availability:', {
     volunteer: volunteer.first_name + ' ' + volunteer.last_name,
-    rideDay,
-    rideStartTime: rideStartTime.toFixed(2),
-    rideEndTime: rideEndTime.toFixed(2),
+    rideDay: localWindow.rideDay,
+    rideStartTime: localWindow.rideStartDecimal.toFixed(2),
+    rideEndTime: localWindow.rideEndDecimal.toFixed(2),
     availabilitySlots: availability.length,
     parsedSlots: availability.map(s => `${s.startDay} ${s.startTime.toFixed(2)}-${s.endTime.toFixed(2)}`)
   });
@@ -712,24 +1342,35 @@ function isVolunteerAvailableForTimeframe(volunteer, rideTimeframe) {
   
   let foundMatchingDay = false;
   for (const slot of availability) {
-    if (slot.startDay === rideDay) {
+    if (slot.startDay === localWindow.rideDay) {
       foundMatchingDay = true;
       console.log(`Checking slot: ${slot.startDay} ${slot.startTime.toFixed(2)}-${slot.endTime.toFixed(2)}`);
       // Check if the entire ride timeframe falls within the volunteer's availability
       // We need the volunteer to be available from start to end of the ride
-      if (rideStartTime >= slot.startTime && rideEndTime <= slot.endTime) {
-        console.log(`✓ MATCH FOUND for ${volunteer.first_name} ${volunteer.last_name}: ride ${rideStartTime.toFixed(2)}-${rideEndTime.toFixed(2)} fits in ${slot.startTime.toFixed(2)}-${slot.endTime.toFixed(2)}`);
+      if (localWindow.rideStartDecimal >= slot.startTime && localWindow.rideEndDecimal <= slot.endTime) {
+        const conflict = getVolunteerAvailabilityConflict(volunteer, rideTimeframe);
+        if (conflict) {
+          if (conflict.type === 'single') {
+            console.log(`✗ Volunteer marked unavailable between ${conflict.start.toISOString()} and ${conflict.end.toISOString()}`);
+          } else if (conflict.type === 'recurring') {
+            console.log(`✗ Volunteer has recurring unavailability on ${conflict.weekday} from ${formatMinutesToTime(conflict.startMinutes)} to ${formatMinutesToTime(conflict.endMinutes)}`);
+          } else {
+            console.log('✗ Volunteer marked unavailable for this timeframe');
+          }
+          return false;
+        }
+        console.log(`✓ MATCH FOUND for ${volunteer.first_name} ${volunteer.last_name}: ride ${localWindow.rideStartDecimal.toFixed(2)}-${localWindow.rideEndDecimal.toFixed(2)} fits in ${slot.startTime.toFixed(2)}-${slot.endTime.toFixed(2)}`);
         return true;
       } else {
-        console.log(`✗ No match: ride ${rideStartTime.toFixed(2)}-${rideEndTime.toFixed(2)} not within slot ${slot.startTime.toFixed(2)}-${slot.endTime.toFixed(2)}`);
-        console.log(`  Details: rideStartTime (${rideStartTime.toFixed(2)}) >= slot.startTime (${slot.startTime.toFixed(2)}) = ${rideStartTime >= slot.startTime}`);
-        console.log(`           rideEndTime (${rideEndTime.toFixed(2)}) <= slot.endTime (${slot.endTime.toFixed(2)}) = ${rideEndTime <= slot.endTime}`);
+        console.log(`✗ No match: ride ${localWindow.rideStartDecimal.toFixed(2)}-${localWindow.rideEndDecimal.toFixed(2)} not within slot ${slot.startTime.toFixed(2)}-${slot.endTime.toFixed(2)}`);
+        console.log(`  Details: rideStartTime (${localWindow.rideStartDecimal.toFixed(2)}) >= slot.startTime (${slot.startTime.toFixed(2)}) = ${localWindow.rideStartDecimal >= slot.startTime}`);
+        console.log(`           rideEndTime (${localWindow.rideEndDecimal.toFixed(2)}) <= slot.endTime (${slot.endTime.toFixed(2)}) = ${localWindow.rideEndDecimal <= slot.endTime}`);
       }
     }
   }
   
   if (!foundMatchingDay) {
-    console.log(`No slots found for ${rideDay} (available days: ${[...new Set(availability.map(s => s.startDay))].join(', ')})`);
+    console.log(`No slots found for ${localWindow.rideDay} (available days: ${[...new Set(availability.map(s => s.startDay))].join(', ')})`);
   }
   return false;
 }
@@ -939,7 +1580,9 @@ async function matchDriversForRide(rideId) {
         }
         
         // Check availability for timeframe
-        if (isVolunteerAvailableForTimeframe(volunteer, rideTimeframe)) {
+        const availabilityConflict = getVolunteerAvailabilityConflict(volunteer, rideTimeframe);
+
+        if (!availabilityConflict && isVolunteerAvailableForTimeframe(volunteer, rideTimeframe)) {
           available.push({
             id: volunteer.id,
             name: `${volunteer.first_name} ${volunteer.last_name}`,
@@ -955,6 +1598,23 @@ async function matchDriversForRide(rideId) {
             allergens_in_car: volunteer.allergens_in_car || ''
           });
         } else {
+          let reason = 'Not available during requested timeframe';
+          if (availabilityConflict) {
+            if (availabilityConflict.type === 'single') {
+              reason = `Volunteer reported unavailable from ${availabilityConflict.start.toISOString()} to ${availabilityConflict.end.toISOString()}`;
+            } else if (availabilityConflict.type === 'recurring') {
+              let rangeDetails = '';
+              if (availabilityConflict.effectiveFrom && availabilityConflict.effectiveTo) {
+                rangeDetails = ` between ${formatDateISO(availabilityConflict.effectiveFrom)} and ${formatDateISO(availabilityConflict.effectiveTo)}`;
+              } else if (availabilityConflict.effectiveFrom) {
+                rangeDetails = ` starting ${formatDateISO(availabilityConflict.effectiveFrom)}`;
+              } else if (availabilityConflict.effectiveTo) {
+                rangeDetails = ` until ${formatDateISO(availabilityConflict.effectiveTo)}`;
+              }
+              reason = `Volunteer has recurring unavailability on ${availabilityConflict.weekday} from ${formatMinutesToTime(availabilityConflict.startMinutes)} to ${formatMinutesToTime(availabilityConflict.endMinutes)}${rangeDetails}`;
+            }
+          }
+
           unavailable.push({
             id: volunteer.id,
             name: `${volunteer.first_name} ${volunteer.last_name}`,
@@ -968,7 +1628,7 @@ async function matchDriversForRide(rideId) {
             accepts_service_animal: volunteer.accepts_service_animal || false,
             destination_limitations: volunteer.destination_limitations || '',
             allergens_in_car: volunteer.allergens_in_car || '',
-            reason: 'Not available during requested timeframe'
+            reason
           });
         }
       }
@@ -1190,7 +1850,9 @@ async function matchDriversForRideByUID(uid) {
         }
         
         // Check availability for timeframe
-        if (isVolunteerAvailableForTimeframe(volunteer, rideTimeframe)) {
+        const availabilityConflict = getVolunteerAvailabilityConflict(volunteer, rideTimeframe);
+
+        if (!availabilityConflict && isVolunteerAvailableForTimeframe(volunteer, rideTimeframe)) {
           available.push({
             id: volunteer.id,
             name: `${volunteer.first_name} ${volunteer.last_name}`,
@@ -1204,6 +1866,23 @@ async function matchDriversForRideByUID(uid) {
             allergens_in_car: volunteer.allergens_in_car || ''
           });
         } else {
+          let reason = 'Not available during requested timeframe';
+          if (availabilityConflict) {
+            if (availabilityConflict.type === 'single') {
+              reason = `Volunteer reported unavailable from ${availabilityConflict.start.toISOString()} to ${availabilityConflict.end.toISOString()}`;
+            } else if (availabilityConflict.type === 'recurring') {
+              let rangeDetails = '';
+              if (availabilityConflict.effectiveFrom && availabilityConflict.effectiveTo) {
+                rangeDetails = ` between ${formatDateISO(availabilityConflict.effectiveFrom)} and ${formatDateISO(availabilityConflict.effectiveTo)}`;
+              } else if (availabilityConflict.effectiveFrom) {
+                rangeDetails = ` starting ${formatDateISO(availabilityConflict.effectiveFrom)}`;
+              } else if (availabilityConflict.effectiveTo) {
+                rangeDetails = ` until ${formatDateISO(availabilityConflict.effectiveTo)}`;
+              }
+              reason = `Volunteer has recurring unavailability on ${availabilityConflict.weekday} from ${formatMinutesToTime(availabilityConflict.startMinutes)} to ${formatMinutesToTime(availabilityConflict.endMinutes)}${rangeDetails}`;
+            }
+          }
+
           unavailable.push({
             id: volunteer.id,
             name: `${volunteer.first_name} ${volunteer.last_name}`,
@@ -1215,7 +1894,7 @@ async function matchDriversForRideByUID(uid) {
             accepts_service_animal: volunteer.accepts_service_animal || false,
             destination_limitations: volunteer.destination_limitations || '',
             allergens_in_car: volunteer.allergens_in_car || '',
-            reason: 'Not available during requested timeframe'
+            reason
           });
         }
       }
@@ -1239,6 +1918,179 @@ async function matchDriversForRideByUID(uid) {
     };
   } catch (error) {
     console.error('Error in matchDriversForRideByUID:', error);
+    return {
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    };
+  }
+}
+
+async function addVolunteerUnavailability(volunteerId, payload) {
+  try {
+    if (!volunteerId) {
+      return {
+        success: false,
+        message: 'Volunteer ID is required'
+      };
+    }
+
+    if (payload === undefined || payload === null) {
+      return {
+        success: false,
+        message: 'Unavailability data is required'
+      };
+    }
+
+    const entriesInput = Array.isArray(payload) ? payload : [payload];
+
+    if (entriesInput.length === 0) {
+      return {
+        success: false,
+        message: 'No unavailability entries provided'
+      };
+    }
+
+    const parsedEntries = [];
+    const validationErrors = [];
+
+    entriesInput.forEach((entry, index) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+        validationErrors.push({
+          index,
+          value: entry,
+          reason: 'Entry must be an object'
+        });
+        return;
+      }
+
+      const repeated = entry.repeated === true;
+      const unavailabilityStringRaw = typeof entry.unavailabilityString === 'string'
+        ? entry.unavailabilityString
+        : typeof entry.unavailability_string === 'string'
+          ? entry.unavailability_string
+          : null;
+
+      const unavailabilityString = unavailabilityStringRaw ? unavailabilityStringRaw.trim() : '';
+      if (!unavailabilityString) {
+        validationErrors.push({
+          index,
+          value: entry,
+          reason: 'unavailabilityString is required'
+        });
+        return;
+      }
+
+      const slots = parseUnavailabilityStringToSlots(unavailabilityString);
+      if (slots.length === 0) {
+        validationErrors.push({
+          index,
+          value: entry,
+          reason: 'unavailabilityString could not be parsed into valid day/time pairs'
+        });
+        return;
+      }
+
+      const effectiveFrom = normalizeDateInput(entry.effectiveFrom ?? entry.effective_from ?? entry.startDate);
+      const effectiveTo = normalizeDateInput(entry.effectiveTo ?? entry.effective_to ?? entry.endDate);
+
+      if (!repeated && !effectiveFrom) {
+        validationErrors.push({
+          index,
+          value: entry,
+          reason: 'effectiveFrom is required for non-recurring unavailability'
+        });
+        return;
+      }
+
+      if (effectiveFrom && effectiveTo && effectiveTo < effectiveFrom) {
+        validationErrors.push({
+          index,
+          value: entry,
+          reason: 'effectiveTo must be on or after effectiveFrom'
+        });
+        return;
+      }
+
+      parsedEntries.push({
+        repeated,
+        unavailabilityString,
+        effectiveFrom,
+        effectiveTo: effectiveTo || effectiveFrom || null
+      });
+    });
+
+    if (validationErrors.length > 0) {
+      return {
+        success: false,
+        message: 'One or more unavailability entries are invalid',
+        errors: validationErrors
+      };
+    }
+
+    if (parsedEntries.length === 0) {
+      return {
+        success: false,
+        message: 'No valid unavailability entries parsed'
+      };
+    }
+
+    const volunteerResult = await dataAccess.getVolunteerById(volunteerId);
+    if (!volunteerResult.success) {
+      return {
+        success: false,
+        message: 'Volunteer not found',
+        error: volunteerResult.error
+      };
+    }
+
+    const volunteer = volunteerResult.volunteer;
+    if (!isDriverRole(volunteer)) {
+      return {
+        success: false,
+        message: 'Volunteer is not registered as a driver'
+      };
+    }
+
+    const updateResult = await dataAccess.addVolunteerUnavailability(
+      volunteerId,
+      parsedEntries
+    );
+
+    if (!updateResult.success) {
+      return {
+        success: false,
+        message: 'Failed to update volunteer unavailability',
+        error: updateResult.error
+      };
+    }
+
+    const normalizedUnavailability = Array.isArray(updateResult.unavailability)
+      ? updateResult.unavailability.map(entry => {
+          const effectiveFromDate = normalizeDateInput(entry.effectiveFrom ?? entry.effective_from);
+          const effectiveToDate = normalizeDateInput(entry.effectiveTo ?? entry.effective_to);
+
+          const createdAt = convertFirestoreTimestamp(entry.createdAt ?? entry.created_at);
+          const updatedAt = convertFirestoreTimestamp(entry.updatedAt ?? entry.updated_at ?? entry.submittedAt);
+
+          return {
+            repeated: entry.repeated === true,
+            unavailabilityString: entry.unavailabilityString || entry.unavailability_string || '',
+            effectiveFrom: effectiveFromDate ? formatDateISO(effectiveFromDate) : null,
+            effectiveTo: effectiveToDate ? formatDateISO(effectiveToDate) : null,
+            createdAt: createdAt ? createdAt.toISOString() : null,
+            updatedAt: updatedAt ? updatedAt.toISOString() : null
+          };
+        })
+      : [];
+
+    return {
+      success: true,
+      message: 'Unavailability recorded successfully',
+      unavailability: normalizedUnavailability
+    };
+  } catch (error) {
+    console.error('Error in addVolunteerUnavailability:', error);
     return {
       success: false,
       message: 'Internal server error',
@@ -1882,6 +2734,7 @@ module.exports = {
   createRide,
   matchDriversForRide,
   matchDriversForRideByUID,
+  addVolunteerUnavailability,
   getRideAppointmentInfo,
   getAllRidesAppointmentInfo,
   getRideByUID,
@@ -1892,6 +2745,7 @@ module.exports = {
   isVolunteerAvailable,
   calculateRideTimeframe,
   isVolunteerAvailableForTimeframe,
+  getVolunteerUnavailabilityConflict,
   convertFirestoreTimestamp,
   getRidesByTimeframe,
   createOrganization,

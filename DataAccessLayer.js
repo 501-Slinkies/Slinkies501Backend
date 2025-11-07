@@ -1,4 +1,4 @@
-const { getFirestore } = require("firebase-admin/firestore");
+const { getFirestore, Timestamp } = require("firebase-admin/firestore");
 const crypto = require("crypto");
 
 async function login(username, password) {
@@ -804,12 +804,99 @@ async function deleteOrganization(orgId) {
   }
 }
 
+async function getVolunteerById(volunteerId) {
+  const db = getFirestore();
+  try {
+    const volunteerDoc = await db.collection("volunteers").doc(volunteerId).get();
+
+    if (!volunteerDoc.exists) {
+      return { success: false, error: "Volunteer not found" };
+    }
+
+    return {
+      success: true,
+      volunteer: {
+        id: volunteerDoc.id,
+        ...volunteerDoc.data()
+      }
+    };
+  } catch (error) {
+    console.error("Error fetching volunteer by ID:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+async function addVolunteerUnavailability(volunteerId, entries = []) {
+  const db = getFirestore();
+  try {
+    const volunteerRef = db.collection("volunteers").doc(volunteerId);
+    const volunteerDoc = await volunteerRef.get();
+
+    if (!volunteerDoc.exists) {
+      return { success: false, error: "Volunteer not found" };
+    }
+
+    const existingUnavailability = volunteerDoc.data().unavailability;
+    const updatedUnavailability = Array.isArray(existingUnavailability)
+      ? existingUnavailability.slice()
+      : [];
+    const submissionTimestamp = Timestamp.fromDate(new Date());
+
+    const sanitizedEntries = Array.isArray(entries)
+      ? entries.map(entry => ({
+          repeated: entry.repeated === true,
+          unavailabilityString: entry.unavailabilityString,
+          effectiveFrom: entry.effectiveFrom ? Timestamp.fromDate(entry.effectiveFrom) : null,
+          effectiveTo: entry.effectiveTo ? Timestamp.fromDate(entry.effectiveTo) : null,
+          createdAt: submissionTimestamp,
+          updatedAt: submissionTimestamp,
+          source: entry.source || "api"
+        }))
+      : [];
+
+    if (sanitizedEntries.length === 0) {
+      return {
+        success: false,
+        error: "No unavailability entries to record"
+      };
+    }
+
+    updatedUnavailability.push(...sanitizedEntries);
+
+    await volunteerRef.update({
+      unavailability: updatedUnavailability,
+      unavailabilityUpdatedAt: submissionTimestamp,
+      updated_at: submissionTimestamp
+    });
+
+    const responseUnavailability = updatedUnavailability.map(entry => ({
+      repeated: entry.repeated === true,
+      unavailabilityString: entry.unavailabilityString,
+      effectiveFrom: entry.effectiveFrom ? entry.effectiveFrom.toDate() : null,
+      effectiveTo: entry.effectiveTo ? entry.effectiveTo.toDate() : null,
+      createdAt: entry.createdAt ? entry.createdAt.toDate() : null,
+      updatedAt: entry.updatedAt ? entry.updatedAt.toDate() : null,
+      source: entry.source || "api"
+    }));
+
+    return {
+      success: true,
+      unavailability: responseUnavailability
+    };
+  } catch (error) {
+    console.error("Error updating volunteer unavailability:", error);
+    return { success: false, error: error.message };
+  }
+}
+
 module.exports = { 
   login, 
   createRole, 
   createPermission, 
   getAllVolunteers, 
-  getVolunteersByOrganization, 
+  getVolunteersByOrganization,
+  getVolunteerById,
+  addVolunteerUnavailability,
   getRideById,
   createRide,
   getRideByUID,
