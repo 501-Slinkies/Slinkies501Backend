@@ -48,6 +48,7 @@ app.use("/api/volunteers", volunteersRouter);
 // Login Endpoint
 // ================================
 app.post('/api/login', async (req, res) => {
+  console.log('Login request body:', req.body);
   const { username, password } = req.body;
   if (!username || !password) {
     return res.status(400).send({ message: 'Username and password are required' });
