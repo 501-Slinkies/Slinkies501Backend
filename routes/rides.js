@@ -25,8 +25,8 @@ router.get("/calendar", async (req, res) => {
 
     let query = db
       .collection("rides")
-      .where("date", ">=", startDate)
-      .where("date", "<=", endDate);
+      .where("Date", ">=", startDate)
+      .where("Date", "<=", endDate);
 
     // Optional filter if a driver is selected
     if (driver_id) {
