@@ -1,243 +1,140 @@
-// routes/reports.js
+// routes/reports.js ✅ FINAL
 
 const express = require("express");
 const router = express.Router();
 const { db } = require("../firebase");
 const _ = require("lodash");
 
-/**
- * ✅ GET /api/reports
- * Example:
- * /api/reports?client_name=true&ride_status=true&start=2025-01-01&end=2025-12-31
- */
-router.get("/", async (req, res) => {
+// ---------------------- REPORT ENTRYPOINT -------------------------
+
+router.get("/:reportName", async (req, res) => {
   try {
+    const { reportName } = req.params;
     const { start, end, organization } = req.query;
 
-    const startDate = start ? new Date(start) : new Date("2000-01-01");
-    const endDate = end ? new Date(end) : new Date();
-
-    // Collect requested fields from the query
-    const requestedFields = Object.keys(req.query)
-      .filter(key => req.query[key] === "true")
-      .map(key => key.toLowerCase());
-
-    const reportsData = await getReportData(requestedFields, startDate, endDate, organization);
-
-    // Convert all fields to snake_case before sending to FlutterFlow
-    const snakeCaseResponse = _.mapKeys(reportsData, (value, key) => _.snakeCase(key));
-
-    res.json({ success: true, reports: snakeCaseResponse });
-  } catch (error) {
-    console.error("Error generating reports:", error);
-    res.status(500).json({ success: false, message: "Server error", error: error.message });
-  }
-});
-
-
-// ✅ POST /api/reports/save 
-router.post("/save", async (req, res) => {
-  try {
-    console.log("🔥 POST BODY RECEIVED:", JSON.stringify(req.body, null, 2));  // <---- ADD THIS
-
-    let { user_id, selectedParams } = req.body;
-
-    // if selectedParams comes as string: "[first_name,last_name]"
-    if (typeof selectedParams === "string") {
-      try {
-        selectedParams = JSON.parse(selectedParams);  // try JSON first
-      } catch {
-        selectedParams = selectedParams
-          .replace(/[\[\]]/g, "") // remove []
-          .split(",")             // split into array
-          .map(f => f.trim());
-      }
-    }
-
-    if (!user_id || !selectedParams || selectedParams.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Missing user_id or selectedParams"
-      });
-    }
-
-    const docRef = await db.collection("savedReports").add({
-      user_id,
-      selectedParams,
-      timestamp: new Date(),
-    });
-
-    res.json({
-      success: true,
-      message: "Saved successfully",
-      document_id: docRef.id
-    });
-
-  } catch (error) {
-    res.status(500).json({ success: false, message: "Server error", error: error.message });
-  }
-});
-
-
-/**
- * ✅ GET /api/reports/:user_id
- * Reads the last saved report preferences and returns report data
- */
-router.get("/:user_id", async (req, res) => {
-  try {
-    const { user_id } = req.params;
-    const { start, end, organization } = req.query;
-
-    if (!user_id) {
-      return res.status(400).json({
-        success: false,
-        message: "Missing user_id"
-      });
-    }
-
-    // Get last saved selection for this user
-    const snapshot = await db
-      .collection("savedReports")
-      .where("user_id", "==", user_id)
-      .orderBy("timestamp", "desc")
-      .limit(1)
-      .get();
-
-    if (snapshot.empty) {
-      return res.json({
-        success: true,
-        reports: [],
-        message: "No saved report filters found"
-      });
-    }
-
-    const saved = snapshot.docs[0].data();
-    let selectedParams = saved.selectedParams; // e.g. ["first_name", "last_name"]
-
-    // ✅ ensure selectedParams is always an array
-    if (typeof selectedParams === "string") {
-      try {
-        selectedParams = JSON.parse(selectedParams);
-      } catch {
-        selectedParams = selectedParams.replace(/[\[\]]/g, "").split(",").map(f => f.trim());
-      }
-    }
-
-    // If FF passed dates, use them, otherwise default
     const startDate = start ? new Date(start) : new Date("2000-01-01");
     const endDate   = end   ? new Date(end)   : new Date();
 
-    // Run the report using stored params
-    const reportsData = await getReportData(selectedParams, startDate, endDate, organization);
+    let data = null;
 
-    // Convert keys to snake_case before sending
-    const snakeCaseResponse = _.mapKeys(reportsData, (v, k) => _.snakeCase(k));
+    switch (reportName) {
 
-    return res.json({
-      success: true,
-      filters_used: selectedParams,
-      reports: snakeCaseResponse,
-    });
+      case "rideVolume":
+        data = await getRideVolume(startDate, endDate, organization);
+        break;
+
+      case "volunteerHours":
+        data = await getVolunteerHours(startDate, endDate, organization);
+        break;
+
+      case "donations":
+        data = await getDonationTotals(startDate, endDate, organization);
+        break;
+
+      default:
+        return res.status(400).json({
+          success: false,
+          message: `Invalid report: ${reportName}`
+        });
+    }
+
+    return res.json({ success: true, report: reportName, ...data });
 
   } catch (error) {
-    console.error("Error generating user report:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error generating report",
-      error: error.message
-    });
+    console.error("❌ Error generating report:", error);
+    res.status(500).json({ success: false, message: "Server error", error: error.message });
   }
 });
 
+// ---------------------- RIDE VOLUME REPORT -------------------------
 
-
-// ===========================================================================
-// ✅ Report generators (Clients, Rides, Volunteers, Meta)
-// ===========================================================================
-
-async function getReportData(fields, startDate, endDate, organization) {
-  const results = {};
-
-  if (fields.includes("client_name") || fields.includes("date_of_birth")) {
-    results.clients = await getClientsData(startDate, endDate, organization);
-  }
-
-  if (fields.includes("ride_status") || fields.includes("trip_mileage") || fields.includes("driver_id")) {
-    results.rides = await getRideVolume(startDate, endDate, organization);
-  }
-
-  if (fields.includes("volunteering_status") || fields.includes("mobility_assistance")) {
-    results.volunteers = await getVolunteerData(startDate, endDate, organization);
-  }
-
-  if (fields.includes("security_assignment") || fields.includes("date_enrolled") || fields.includes("m_f")) {
-    results.client_metadata = await getClientMetadata(startDate, endDate, organization);
-  }
-
-  return results;
-}
-
-
-// ✅ Fetch Clients data
-async function getClientsData(startDate, endDate, organization) {
-  let query = db.collection("clients");
-  if (organization) query = query.where("organization_id", "==", organization);
-
-  const snapshot = await query.get();
-
-  return snapshot.docs.map(doc => ({
-    client_name: doc.data().client_name || "",
-    date_of_birth: doc.data().date_of_birth || "",
-    volunteering_status: doc.data().volunteering_status || "",
-    mobility_assistance: doc.data().mobility_assistance || "",
-    date_enrolled: doc.data().date_enrolled || "",
-    m_f: doc.data().m_f || ""
-  }));
-}
-
-
-// ✅ Fetch Rides data
 async function getRideVolume(startDate, endDate, organization) {
   let query = db.collection("rides")
-    .where("date", ">=", startDate)
-    .where("date", "<=", endDate);
+    .where("Date", ">=", startDate)
+    .where("Date", "<=", endDate);
 
-  if (organization) query = query.where("organization_id", "==", organization);
+  if (organization) query = query.where("organization", "==", organization);
 
   const snapshot = await query.get();
 
-  return snapshot.docs.map(doc => ({
-    ride_status: doc.data().status || doc.data().ride_status || "",
-    trip_mileage: doc.data().MilesDriven || doc.data().miles_driven || "",
-    driver_id: doc.data().Driver || doc.data().driver_volunteer_ref || ""
-  }));
+  const monthlyCount = {};
+  let totalRides = 0;
+
+  snapshot.forEach(doc => {
+    const ride = doc.data();
+    const date = ride.Date?.toDate?.() || null;
+    if (!date) return;
+
+    const key = date.toLocaleString("en-US", { month: "short", year: "numeric" });
+
+    monthlyCount[key] = (monthlyCount[key] || 0) + 1;
+    totalRides++;
+  });
+
+  return {
+    totalRides,
+    monthly: monthlyCount
+  };
 }
 
+// ---------------------- VOLUNTEER HOURS -------------------------
 
-// ✅ Fetch Volunteer data
-async function getVolunteerData(startDate, endDate, organization) {
-  let query = db.collection("volunteers");
-  if (organization) query = query.where("organization_id", "==", organization);
+async function getVolunteerHours(startDate, endDate, organization) {
+  let query = db.collection("rides")
+    .where("Date", ">=", startDate)
+    .where("Date", "<=", endDate);
+
+  if (organization) query = query.where("organization", "==", organization);
 
   const snapshot = await query.get();
-  return snapshot.docs.map(doc => ({
-    volunteering_status: doc.data().volunteering_status || "",
-    mobility_assistance: doc.data().mobility_assistance || ""
-  }));
+
+  const volunteerTotals = {};
+  let totalHours = 0;
+
+  snapshot.forEach(doc => {
+    const r = doc.data();
+    const hours = r.volunteerHours || 0;
+    const driverUID = r.driverUID;
+
+    if (driverUID && hours > 0) {
+      volunteerTotals[driverUID] = (volunteerTotals[driverUID] || 0) + hours;
+      totalHours += hours;
+    }
+  });
+
+  return {
+    totalHours,
+    byVolunteer: volunteerTotals
+  };
 }
 
+// ---------------------- DONATIONS REPORT -------------------------
 
-// ✅ Fetch additional metadata
-async function getClientMetadata(startDate, endDate, organization) {
-  let query = db.collection("clients");
-  if (organization) query = query.where("organization_id", "==", organization);
+async function getDonationTotals(startDate, endDate, organization) {
+  let query = db.collection("rides")
+    .where("Date", ">=", startDate)
+    .where("Date", "<=", endDate);
+
+  if (organization) query = query.where("organization", "==", organization);
 
   const snapshot = await query.get();
-  return snapshot.docs.map(doc => ({
-    security_assignment: doc.data().security_assignment || "",
-    date_enrolled: doc.data().date_enrolled || "",
-    m_f: doc.data().m_f || ""
-  }));
+
+  const donationTotals = {};
+  let totalAmount = 0;
+
+  snapshot.forEach(doc => {
+    const r = doc.data();
+    const amount = r.donationAmount || 0;
+    const type = r.donationReceived || "Unknown";
+
+    donationTotals[type] = (donationTotals[type] || 0) + amount;
+    totalAmount += amount;
+  });
+
+  return {
+    totalAmount,
+    byType: donationTotals
+  };
 }
 
 module.exports = router;
