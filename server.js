@@ -1048,12 +1048,20 @@ app.use('/api/clients', clientsRouter);
 // ================================
 app.use("/api/reports", reportsRouter);
 
+
+// ================================
+// Notification
+// ================================
+app.use("/api/notifications", require("./routes/notifications"));
+
+
 // ================================
 // Root Endpoint
 // ================================
 app.get('/', (req, res) => {
   res.send('🚀 Server is running!');
 });
+
 
 // ================================
 // Start Server
