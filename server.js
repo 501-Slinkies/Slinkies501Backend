@@ -47,7 +47,7 @@ app.use("/api/volunteers", volunteersRouter);
 // ================================
 // Login Endpoint
 // ================================
-app.post('/login', async (req, res) => {
+app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) {
     return res.status(400).send({ message: 'Username and password are required' });
@@ -61,7 +61,7 @@ app.post('/login', async (req, res) => {
   }
 });
 
-app.post('/roles', async (req, res) => {
+app.post('/api/roles', async (req, res) => {
   try {
     // Extract JWT token from Authorization header
     const authHeader = req.headers.authorization;
@@ -140,7 +140,7 @@ app.post('/roles', async (req, res) => {
   }
 });
 
-app.get('/roles/:roleName/parent', async (req, res) => {
+app.get('/api/roles/:roleName/parent', async (req, res) => {
   try {
     const { roleName } = req.params;
 
