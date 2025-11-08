@@ -140,6 +140,37 @@ app.post('/roles', async (req, res) => {
   }
 });
 
+app.get('/roles/:roleName/parent', async (req, res) => {
+  try {
+    const { roleName } = req.params;
+
+    if (!roleName) {
+      return res.status(400).send({
+        success: false,
+        message: 'Role name is required'
+      });
+    }
+
+    const result = await applicationLayer.getParentRole(roleName);
+
+    if (result.success) {
+      return res.status(200).send(result);
+    }
+
+    const statusCode =
+      result.message && result.message.toLowerCase().includes('not found') ? 404 : 400;
+
+    return res.status(statusCode).send(result);
+  } catch (error) {
+    console.error('Error in GET /roles/:roleName/parent endpoint:', error);
+    return res.status(500).send({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+});
+
 // User account creation endpoint
 app.post('/api/users', async (req, res) => {
   try {
