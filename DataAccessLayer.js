@@ -1,5 +1,5 @@
 const { getFirestore, Timestamp } = require("firebase-admin/firestore");
-const crypto = require("crypto");
+const { hashPassword } = require("./utils/encryption");
 
 // Migration-friendly batch helpers
 function createBatch() {
@@ -30,13 +30,24 @@ async function login(username, password) {
   }
 
   let user = null;
+  let hashedInput;
+  try {
+    hashedInput = hashPassword(password);
+  } catch (error) {
+    console.error("Failed to hash password during login:", error);
+    return null;
+  }
+
   for (const doc of snapshot.docs) {
     const userData = doc.data();
-    // Hash the provided password using sha256
-    //const hashedPassword = crypto.createHash('sha256').update(password).digest('hex');
-    
-    // Compare the hashed password with the stored password
-    if (userData.password === password) {
+    const storedPassword = userData.password;
+
+    if (typeof storedPassword !== "string") {
+      continue;
+    }
+
+    // Support both hashed passwords (preferred) and legacy plain-text passwords.
+    if (storedPassword === hashedInput || storedPassword === password) {
       user = { id: doc.id, ...userData };
       break;
     }
@@ -111,6 +122,44 @@ async function createPermission(permissionData) {
     return { success: true, permissionId: permissionData.name };
   } catch (error) {
     console.error("Error creating permission:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+async function getRoleByName(roleName) {
+  const db = getFirestore();
+
+  try {
+    if (!roleName || typeof roleName !== "string") {
+      return { success: false, error: "Role name is required" };
+    }
+
+    const normalizedRoleName = roleName.trim();
+    if (!normalizedRoleName) {
+      return { success: false, error: "Role name is required" };
+    }
+
+    // Attempt to fetch by document ID (role name is commonly used as doc id)
+    const roleDoc = await db.collection("Roles").doc(normalizedRoleName).get();
+    if (roleDoc.exists) {
+      return { success: true, role: { id: roleDoc.id, ...roleDoc.data() } };
+    }
+
+    // Fallback: query by name field if stored separately
+    const querySnapshot = await db
+      .collection("Roles")
+      .where("name", "==", normalizedRoleName)
+      .limit(1)
+      .get();
+
+    if (!querySnapshot.empty) {
+      const doc = querySnapshot.docs[0];
+      return { success: true, role: { id: doc.id, ...doc.data() } };
+    }
+
+    return { success: false, error: "Role not found" };
+  } catch (error) {
+    console.error("Error fetching role:", error);
     return { success: false, error: error.message };
   }
 }
@@ -911,6 +960,7 @@ module.exports = {
   login, 
   createRole, 
   createPermission, 
+  getRoleByName,
   getAllVolunteers, 
   getVolunteersByOrganization,
   getVolunteerById,

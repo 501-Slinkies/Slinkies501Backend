@@ -4,9 +4,46 @@
 const dataAccess = require('./DataAccessLayer');
 const jwt = require('jsonwebtoken');
 
+function normalizeVolunteerRoles(user) {
+  if (!user || typeof user !== 'object') {
+    return [];
+  }
+
+  const roleSources = [
+    user.roles,
+    user.role,
+    user.role_name
+  ];
+
+  const normalized = [];
+
+  for (const source of roleSources) {
+    if (!source) {
+      continue;
+    }
+
+    if (Array.isArray(source)) {
+      for (const entry of source) {
+        if (typeof entry === 'string' && entry.trim()) {
+          normalized.push(entry.trim());
+        }
+      }
+      continue;
+    }
+
+    if (typeof source === 'string' && source.trim()) {
+      normalized.push(source.trim());
+    }
+  }
+
+  // Remove duplicates while preserving order.
+  return [...new Set(normalized)];
+}
+
 async function loginUser(username, password) {
   const user = await dataAccess.login(username, password);
   if (user) {
+    const roles = normalizeVolunteerRoles(user);
     // Get JWT secret from environment or use default (for development only)
     const secretKey = process.env.JWT_SECRET || 'your-secret-key';
     
@@ -37,7 +74,7 @@ async function loginUser(username, password) {
     const tokenPayload = {
       userId: user.id,
       email: user.email_address,
-      roles: user.roles || [], // Include the roles array from user document
+      roles: roles,
       org: organizationInfo ? organizationInfo.org_id : null, // Include organization org_id if found
       orgId: organizationInfo ? organizationInfo.id : null, // Include organization document ID if found
       iat: Math.floor(Date.now() / 1000) // Issued at timestamp
@@ -53,7 +90,7 @@ async function loginUser(username, password) {
       token: token,
       user: { 
         email: user.email_address, 
-        roles: user.roles || [], // Available roles from user document
+        roles: roles, // Available roles from user document
         userId: user.volunteer_id,
         organizationId: organizationInfo ? organizationInfo.org_id : null, // Organization ID (org_id)
         organization: organizationInfo // Full organization details (optional)
@@ -62,6 +99,40 @@ async function loginUser(username, password) {
   } else {
     console.log('Login failed');
     return { success: false, message: 'Invalid credentials' };
+  }
+}
+
+async function getParentRole(roleName) {
+  try {
+    if (!roleName || typeof roleName !== 'string' || !roleName.trim()) {
+      return {
+        success: false,
+        message: 'Role name is required'
+      };
+    }
+
+    const roleResult = await dataAccess.getRoleByName(roleName.trim());
+
+    if (!roleResult.success) {
+      return {
+        success: false,
+        message: roleResult.error || 'Role not found'
+      };
+    }
+
+    const role = roleResult.role || {};
+    return {
+      success: true,
+      role: role.name || role.id || roleName.trim(),
+      parent_role: role.parent_role || null
+    };
+  } catch (error) {
+    console.error('Error fetching parent role:', error);
+    return {
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    };
   }
 }
 
@@ -2730,6 +2801,7 @@ async function deleteOrganization(orgId, authToken) {
 module.exports = { 
   loginUser, 
   createRoleWithPermissions, 
+  getParentRole,
   verifyToken, 
   createRide,
   matchDriversForRide,
