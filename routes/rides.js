@@ -4,73 +4,68 @@ const express = require("express");
 const router = express.Router();
 const { db } = require("../firebase");
 
-// ======================================================
-// ✅ GET /api/rides/calendar
-// Returns rides grouped by date → perfect for calendar UI
-//
-// Optional query params:
-//   start=YYYY-MM-DD
-//   end=YYYY-MM-DD
-//   driver_id=xxxxxx (optional filter)
-// ======================================================
+/**
+ * ============================================================================
+ * ✅ GET /api/rides/calendar
+ * Returns rides formatted for calendar view
+ * Supports filters: start, end, status, driver_id, organization
+ *
+ * Example:
+ * /api/rides/calendar?start=2025-09-01&end=2025-12-31&status=unassigned
+ * ============================================================================
+ */
+
 router.get("/calendar", async (req, res) => {
   try {
-    const { start, end, driver_id } = req.query;
+    const { start, end, status, driver_id, organization } = req.query;
 
-    // Convert params into proper Date values
+    // Convert dates safely
     const startDate = start ? new Date(start) : new Date("2000-01-01");
-    const endDate = end ? new Date(end) : new Date("2100-01-01");
+    const endDate = end ? new Date(end) : new Date("3000-01-01");
 
-    console.log("📅 Calendar range:", startDate, "→", endDate);
-
-    let query = db
-      .collection("rides")
+    // Query Firestore
+    let query = db.collection("rides")
       .where("Date", ">=", startDate)
-      .where("Date", "<=", endDate);
+      .where("Date", "<=", endDate);          // Firestore field **must be capital D** ✅
 
-    // Optional filter if a driver is selected
-    if (driver_id) {
-      query = query.where("driver_volunteer_ref", "==", driver_id);
-    }
+    if (status) query = query.where("status", "==", status);
+    if (driver_id) query = query.where("driverUID", "==", driver_id);
+    if (organization) query = query.where("organization", "==", organization);
 
     const snapshot = await query.get();
-
     if (snapshot.empty) {
       return res.json({ success: true, rides: [] });
     }
 
-    // Format data for calendar use — grouped by date
-    const calendarData = {};
+    const rides = snapshot.docs.map(doc => {
+      const data = doc.data();
 
-    snapshot.forEach(doc => {
-      const ride = doc.data();
-      const rideDate = ride.date.toDate().toISOString().split("T")[0]; // YYYY-MM-DD
-
-      if (!calendarData[rideDate]) calendarData[rideDate] = [];
-
-      calendarData[rideDate].push({
-        ride_id: doc.id,
-        client_ref: ride.client_ref || "",
-        driver_id: ride.driver_volunteer_ref || "",
-        status: ride.status || "Unassigned",
-        miles_driven: ride.miles_driven || ride.MilesDriven || 0,
-        start_location: ride.start_location_address_ref || "",
-        end_location: ride.end_location_address_ref || "",
-        notes: ride.external_comments || ""
-      });
+      return {
+        ride_id: data.ride_id || doc.id,
+        date: data.Date,                            // Calendar date ✅
+        pickupTime: data.pickupTime || null,
+        appointmentTime: data.appointmentTime || null,
+        status: data.status || "",
+        appointment_type: data.appointment_type || "",
+        clientUID: data.clientUID || "",
+        driverUID: data.driverUID || "",
+        destinationUID: data.destinationUID || "",
+        milesDriven: data.milesDriven || 0,
+        wheelchair: data.wheelchair || false
+      };
     });
 
     res.json({
       success: true,
-      total_days: Object.keys(calendarData).length,
-      rides: calendarData,
+      rides,
+      count: rides.length
     });
 
   } catch (error) {
-    console.error("❌ Error loading calendar rides:", error);
+    console.error("🔥 Error fetching calendar rides:", error);
     res.status(500).json({
       success: false,
-      message: "Server error",
+      message: "Server error loading calendar rides.",
       error: error.message
     });
   }
