@@ -359,7 +359,7 @@ async function migrateCallData(filePath) {
                 estimatedDuration: parseDuration(row[findKey(row, 'ESTIMATED LENGTH OF APPOINTMENT')]),
                 purpose: row[findKey(row, 'PURPOSE OF TRIP')] || '',
                 tripType: parseTripType(row[findKey(row, 'ROUND TRIP OR ONE WAY')]),
-                status: 'unassigned',
+                status: 'Unassigned',
                 wheelchair: parseWheelchair(row[findKey(row, 'WHEELCHAIR')]),
                 wheelchairType: '', 
                 milesDriven: 0,
