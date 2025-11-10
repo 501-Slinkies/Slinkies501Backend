@@ -422,3 +422,100 @@ Content-Type: application/json
 DELETE http://localhost:3000/api/organizations/QUICK-001
 ```
 
+---
+
+# Driver Ride Lookup Tests
+
+## 1. Get Rides for Driver (GET)
+
+### Endpoint
+```
+GET /api/drivers/:driverId/rides
+```
+
+### Headers
+```
+Authorization: Bearer YOUR_TOKEN (optional)
+```
+
+### Example Request
+```bash
+curl --location --request GET "http://localhost:3000/api/drivers/abc123/rides" \
+  --header "Authorization: Bearer {{token}}"
+```
+
+### Expected Response (Success - 200)
+```json
+{
+  "success": true,
+  "message": "Found 3 rides for volunteer",
+  "data": {
+    "driverFirestoreId": "abc123",
+    "driver": {
+      "id": "abc123",
+      "first_name": "Joan",
+      "last_name": "Driver"
+    },
+    "identifiersQueried": [
+      "abc123",
+      "VOL-001"
+    ],
+    "identifiersMatched": [
+      "abc123"
+    ],
+    "total": 3,
+    "rides": [
+      {
+        "id": "rideDocId1",
+        "Date": "9/15/2025",
+        "pickupTme": "10:15 AM",
+        "appointmentTime": "11:00 AM",
+        "status": "assigned"
+      }
+    ]
+  }
+}
+```
+
+### Expected Response (Success, No Assignments - 200)
+```json
+{
+  "success": true,
+  "message": "Found 0 rides for volunteer",
+  "data": {
+    "driverFirestoreId": "abc123",
+    "driver": {
+      "id": "abc123",
+      "first_name": "Joan",
+      "last_name": "Driver"
+    },
+    "identifiersQueried": [
+      "abc123"
+    ],
+    "identifiersMatched": [],
+    "total": 0,
+    "rides": []
+  }
+}
+```
+
+### Expected Response (Driver Not Found - 404)
+```json
+{
+  "success": false,
+  "message": "Driver not found"
+}
+```
+
+### Postman Tests
+```javascript
+pm.test("status code is 200", () => pm.response.to.have.status(200));
+
+const body = pm.response.json();
+pm.test("query succeeded", () => pm.expect(body.success).to.be.true);
+pm.test("rides array exists", () => pm.expect(body?.data?.rides).to.be.an("array"));
+pm.test("identifiers tracked", () => pm.expect(body?.data?.identifiersQueried).to.be.an("array"));
+```
+
+These tests cover both populated and empty ride assignments. When using a volunteer ID with no rides, the API still returns `success: true` and an empty `rides` array, making it safe to include this test in automated smoke checks.
+
