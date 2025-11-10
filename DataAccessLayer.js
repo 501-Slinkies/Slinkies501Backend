@@ -276,6 +276,131 @@ async function getRidesByDriverId(driverId) {
   }
 }
 
+async function getRidesByDriverIdentifiers(identifiers) {
+  const db = getFirestore();
+  try {
+    if (!Array.isArray(identifiers) || identifiers.length === 0) {
+      return { success: true, rides: [], matchedIdentifiers: [] };
+    }
+
+    const normalizedIdentifiers = Array.from(
+      new Set(
+        identifiers
+          .filter(value => value !== undefined && value !== null)
+          .map(value => {
+            const str = typeof value === 'string' ? value : `${value}`;
+            return str.trim();
+          })
+          .filter(value => value.length > 0)
+      )
+    );
+
+    if (normalizedIdentifiers.length === 0) {
+      return { success: true, rides: [], matchedIdentifiers: [] };
+    }
+
+    const collectionsToCheck = ['rides', 'Rides'];
+    const stringFields = [
+      'assignedTo',
+      'assigned_to',
+      'driverUID',
+      'driverUid',
+      'DriverUID',
+      'driverId',
+      'driver_id',
+      'driverVolunteerUID',
+      'driver_volunteer_uid',
+      'driverVolunteerId',
+      'driver_volunteer_id',
+      'driverVolunteer',
+      'driver_volunteer',
+      'driverVolunteerName',
+      'driver_volunteer_name'
+    ];
+    const referenceFields = [
+      'Driver',
+      'driverVolunteerRef',
+      'driver_volunteer_ref'
+    ];
+
+    const rides = [];
+    const seenKeys = new Set();
+    const matchedIdentifiers = new Set();
+
+    for (const collectionName of collectionsToCheck) {
+      const collectionRef = db.collection(collectionName);
+
+      for (const field of stringFields) {
+        for (const identifier of normalizedIdentifiers) {
+          try {
+            const snapshot = await collectionRef.where(field, '==', identifier).get();
+            if (snapshot.empty) {
+              continue;
+            }
+
+            snapshot.forEach(doc => {
+              const dedupeKey = `${collectionName}:${doc.id}`;
+              if (seenKeys.has(dedupeKey)) {
+                return;
+              }
+              seenKeys.add(dedupeKey);
+              matchedIdentifiers.add(identifier);
+              rides.push({
+                id: doc.id,
+                sourceCollection: collectionName,
+                matchField: field,
+                matchIdentifier: identifier,
+                ...doc.data()
+              });
+            });
+          } catch (error) {
+            console.warn(`Failed querying ${collectionName}.${field} for identifier ${identifier}:`, error.message);
+          }
+        }
+      }
+
+      for (const field of referenceFields) {
+        for (const identifier of normalizedIdentifiers) {
+          try {
+            const reference = db.collection('volunteers').doc(identifier);
+            const snapshot = await collectionRef.where(field, '==', reference).get();
+            if (snapshot.empty) {
+              continue;
+            }
+
+            snapshot.forEach(doc => {
+              const dedupeKey = `${collectionName}:${doc.id}`;
+              if (seenKeys.has(dedupeKey)) {
+                return;
+              }
+              seenKeys.add(dedupeKey);
+              matchedIdentifiers.add(identifier);
+              rides.push({
+                id: doc.id,
+                sourceCollection: collectionName,
+                matchField: field,
+                matchIdentifier: identifier,
+                ...doc.data()
+              });
+            });
+          } catch (error) {
+            console.warn(`Failed querying ${collectionName}.${field} for identifier ${identifier}:`, error.message);
+          }
+        }
+      }
+    }
+
+    return {
+      success: true,
+      rides,
+      matchedIdentifiers: Array.from(matchedIdentifiers)
+    };
+  } catch (error) {
+    console.error('Error fetching rides by driver identifiers:', error);
+    return { success: false, error: error.message };
+  }
+}
+
 async function createUser(userData) {
   const db = getFirestore();
   try {
@@ -466,19 +591,41 @@ async function deleteUser(userId) {
 
 async function fetchRidesInRange(startDate, endDate) {
   const db = getFirestore();
-  const ridesRef = db.collection('rides');
-
-  const snapshot = await ridesRef
-    .where('appointmentTime', '>=', new Date(startDate))
-    .where('appointmentTime', '<=', new Date(endDate))
-    .get();
-
-  if (snapshot.empty) return [];
-
+  const rangeStart = new Date(startDate);
+  const rangeEnd = new Date(endDate);
   const rides = [];
-  snapshot.forEach(doc => {
-    rides.push({ id: doc.id, ...doc.data() });
-  });
+  const seen = new Set();
+  const collectionsToCheck = ['rides', 'Rides'];
+
+  for (const collectionName of collectionsToCheck) {
+    try {
+      const collectionRef = db.collection(collectionName);
+      const snapshot = await collectionRef
+        .where('appointmentTime', '>=', new Date(rangeStart))
+        .where('appointmentTime', '<=', new Date(rangeEnd))
+        .get();
+
+      if (!snapshot.empty) {
+        snapshot.forEach(doc => {
+          const dedupeKey = `${collectionName}:${doc.id}`;
+          if (seen.has(dedupeKey)) {
+            return;
+          }
+          seen.add(dedupeKey);
+          rides.push({
+            id: doc.id,
+            sourceCollection: collectionName,
+            ...doc.data()
+          });
+        });
+      }
+    } catch (error) {
+      console.error(
+        `Error fetching rides from ${collectionName} between ${rangeStart.toISOString()} and ${rangeEnd.toISOString()}:`,
+        error
+      );
+    }
+  }
 
   return rides;
 }
@@ -973,6 +1120,7 @@ module.exports = {
   getClientByReference,
   getDestinationById,
   getRidesByDriverId,
+  getRidesByDriverIdentifiers,
   createUser,
   getUserByEmail,
   getUserById,
