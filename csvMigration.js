@@ -64,7 +64,8 @@ async function createAddress(addressData) {
 
     const newAddress = {
       destination_id: "",
-      organization: addressData.organization || "",
+            // normalize organization -> organization_id (FK to Organizations.org_id)
+            organization_id: addressData.organization_id || addressData.organization || "",
       nickname: addressData.nickname || "",
       street_address,
       address_2: addressData.address_2 || "",
@@ -141,7 +142,7 @@ async function migrateClients(filePath) {
 
         const clientData = {
             client_id: '',
-            organization: '',
+            organization_id: '',
             street_address: row[findKey(row, "STREET ADDRESS")]?.trim() || '',
             address2: row[findKey(row, "ADDRESS 2")]?.trim() || '',
             first_name: row[findKey(row, "FIRST NAME")]?.trim() || '',
@@ -183,6 +184,8 @@ async function migrateClients(filePath) {
         try {
             const docRef = db.collection('clients').doc();
             clientData.client_id = docRef.id;
+            // If CSV included an organization column, try to map it to organization_id
+            clientData.organization_id = row[findKey(row, 'ORGANIZATION')]?.trim() || clientData.organization_id || '';
             DAL.setBatchDoc(batch, 'clients', docRef.id, clientData, { merge: false });
             ops++;
             if (ops >= BATCH_LIMIT) {
@@ -213,7 +216,7 @@ async function migrateVolunteers(filePath) {
 
         const volunteerData = {
             volunteer_id: '',
-            organization: '',
+            organization_id: '',
             first_name: row[findKey(row, "FIRST NAME")]?.trim() || '',
             last_name: row[findKey(row, "LAST NAME")]?.trim() || '',
             password: row[findKey(row, "PASSWORD")]?.trim() || 'defaultPassword',
@@ -261,6 +264,8 @@ async function migrateVolunteers(filePath) {
         try {
             const docRef = db.collection('volunteers').doc();
             volunteerData.volunteer_id = docRef.id;
+            // Map CSV organization field to standardized organization_id
+            volunteerData.organization_id = row[findKey(row, 'ORGANIZATION')]?.trim() || volunteerData.organization_id || '';
             DAL.setBatchDoc(batch, 'volunteers', docRef.id, volunteerData, { merge: false });
             ops++;
             if (ops >= BATCH_LIMIT) {
@@ -339,7 +344,7 @@ async function migrateCallData(filePath) {
             // Map required ride fields first; optional date fields will be set only when parsed
             const rideData = {
                 ride_id: '', // Will be set by createRide
-                organization: '',
+                organization_id: '',
                 clientUID: clientId, // Pass as string, let createRide handle doc ref if needed
                 UID: '', // Will be set by createRide
                 additionalClient1_name: '',
@@ -369,6 +374,9 @@ async function migrateCallData(filePath) {
                 CreatedAt: new Date().toISOString(),
                 UpdatedAt: new Date().toISOString(),
             };
+
+                // Map CSV organization field to standardized organization_id for rides
+                rideData.organization_id = row[findKey(row, 'ORGANIZATION')]?.trim() || rideData.organization_id || '';
 
             // Always set appointmentTime and confirmation dates — use DEFAULT_TIMESTAMP when missing
             rideData.appointmentTime = parsedAppointmentTime || DEFAULT_TIMESTAMP;
