@@ -912,8 +912,9 @@ async function createOrganization(orgData, authToken) {
       }
     }
 
-    // Define required fields based on schema
-    const requiredFields = ['name', 'org_id'];
+  // Define required fields based on schema
+  // org_id will be generated from the Firestore document id, so require a short_name at minimum
+  const requiredFields = ['short_name'];
     const missingFields = requiredFields.filter(field => !orgData[field]);
     if (missingFields.length > 0) {
       return {
@@ -930,7 +931,7 @@ async function createOrganization(orgData, authToken) {
       'email',
       'short_name',
       'phone_number',
-      'lisence_number',
+      'license_number',
       'website',
       'creation_date',
       'address2',
@@ -955,7 +956,14 @@ async function createOrganization(orgData, authToken) {
       'sc_zip',
       'sys_admin_phone_number',
       'sys_admin_user_id',
-      'sys_admin_security_level'
+      'sys_admin_security_level',
+      'minimum_age_of_client',
+      'days_before_ride',
+      'hour_open',
+      'hour_close',
+      'type_of_volunteering',
+      'days_of_operation',
+      'type_of_mobility'
     ];
 
     // Filter to only include allowed fields
@@ -1084,7 +1092,7 @@ async function updateOrganization(orgId, updateData, authToken) {
       'email',
       'short_name',
       'phone_number',
-      'lisence_number',
+      'license_number',
       'website',
       'creation_date',
       'address2',
@@ -1109,7 +1117,14 @@ async function updateOrganization(orgId, updateData, authToken) {
       'sc_zip',
       'sys_admin_phone_number',
       'sys_admin_user_id',
-      'sys_admin_security_level'
+      'sys_admin_security_level',
+      'minimum_age_of_client',
+      'days_before_ride',
+      'hour_open',
+      'hour_close',
+      'type_of_volunteering',
+      'days_of_operation',
+      'type_of_mobility'
     ];
 
     // Filter to only include allowed fields
