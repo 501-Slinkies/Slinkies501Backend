@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
-const { db } = require('./firebase');         
+const { admin, db } = require('./firebase');         
 const applicationLayer = require('./ApplicationLayer');
 const calendarRoutes = require("./calendar");
 const ridesRouter = require("./routes/rides");
@@ -196,7 +196,7 @@ app.post('/api/users', async (req, res) => {
     // Log the account creation attempt
     const ipAddress = getClientIp ? getClientIp(req) : req.ip;
     const userAgent = getUserAgent ? getUserAgent(req) : req.get('user-agent');
-    
+
     if (result.success) {
       // Log successful account creation
       await auditLogger.logPHIModification(
@@ -1111,13 +1111,179 @@ app.use("/api/reports", reportsRouter);
 // Exports
 // ================================
 
-app.get('/api/exports/:collection', async (req, res) => {
-  try {
-    const { collection } = req.params;
-    const { format = 'csv', fields } = req.query;
+// --- Firebase Admin & GCS Setup ---
+const GCS_BUCKET_NAME = process.env.GCS_BUCKET_NAME || 'your-project-id.appspot.com'; 
+const bucket = admin.storage().bucket(GCS_BUCKET_NAME);
 
-    // Validate collection name
-    const allowedCollections = ['clients', 'volunteers', 'rides', 'destination', 'mileage_logs', 'audit_logs', ];
+// Middleware to verify JWT using ApplicationLayer
+const verifyExportToken = async (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ 
+        success: false, 
+        error: 'Authorization token required' 
+      });
+    }
+
+    const token = authHeader.substring(7);
+    const verification = applicationLayer.verifyToken(token);
+
+    if (!verification.success) {
+      return res.status(401).json({ 
+        success: false, 
+        error: 'Invalid or expired token' 
+      });
+    }
+
+    const user = verification.user;
+    
+    // Normalize organization field
+    const effectiveOrg = user.org || user.org_id || user.organization || user.organization_id;
+    
+    if (!effectiveOrg) {
+      return res.status(403).json({ 
+        success: false, 
+        error: 'Organization information not found in token' 
+      });
+    }
+
+    // Attach user info to request
+    req.user = {
+      ...user,
+      org: effectiveOrg
+    };
+
+    next();
+  } catch (error) {
+    console.error('Token verification error:', error);
+    return res.status(500).json({ 
+      success: false, 
+      error: 'Token verification failed' 
+    });
+  }
+};
+
+// ---
+// REUSABLE HELPER FUNCTIONS
+// ---
+
+// Data fetching logic
+const fetchDataFromFirestore = async (collection, effectiveOrg) => {
+  let snapshot;
+  const collRef = db.collection(collection);
+  
+  snapshot = await collRef.where('organization', '==', effectiveOrg).get();
+  if (snapshot.empty) {
+    snapshot = await collRef.where('organization_id', '==', effectiveOrg).get();
+  }
+  if (snapshot.empty) {
+    snapshot = await collRef.where('organizationId', '==', effectiveOrg).get();
+  }
+  if (snapshot.empty && collection === 'organizations') {
+    snapshot = await collRef.where('org_id', '==', effectiveOrg).get();
+    if (snapshot.empty) {
+      const doc = await collRef.doc(effectiveOrg).get();
+      if (doc.exists) {
+        snapshot = { empty: false, docs: [doc], size: 1 };
+      }
+    }
+  }
+
+  if (snapshot.empty) {
+    return []; // Return an empty array if no data
+  }
+
+  return snapshot.docs.map(doc => ({
+    id: doc.id,
+    ...doc.data()
+  }));
+};
+
+// Field filtering logic
+const filterDataByFields = (data, fields) => {
+  if (!fields) {
+    return data; // Return all data if no fields specified
+  }
+  
+  const fieldList = fields.split(',').map(f => f.trim());
+  return data.map(item => {
+    const filtered = {};
+    fieldList.forEach(field => {
+      if (item.hasOwnProperty(field)) {
+        filtered[field] = item[field];
+      }
+    });
+    return filtered;
+  });
+};
+
+// PDF generation logic (returns buffer)
+const generatePdfBuffer = (data, collection) => {
+  return new Promise((resolve, reject) => {
+    try {
+      const doc = new PDFDocument({ margin: 50 });
+      const buffers = [];
+      doc.on('data', buffers.push.bind(buffers));
+      doc.on('end', () => {
+        const pdfBuffer = Buffer.concat(buffers);
+        resolve(pdfBuffer);
+      });
+      doc.on('error', reject);
+
+      doc.fontSize(20).text(`${collection.charAt(0).toUpperCase() + collection.slice(1)} Export`, { align: 'center' });
+      doc.moveDown();
+      doc.fontSize(10).text(`Generated: ${new Date().toLocaleString()}`, { align: 'center' });
+      doc.text(`Total Records: ${data.length}`, { align: 'center' });
+      doc.moveDown(2);
+
+      const allKeys = new Set();
+      data.forEach(item => Object.keys(item).forEach(key => allKeys.add(key)));
+      const keys = Array.from(allKeys);
+
+      doc.fontSize(8);
+      data.forEach((item, index) => {
+        if (doc.y > 700) doc.addPage();
+        
+        doc.fontSize(10).font('Helvetica-Bold').text(`Record ${index + 1}:`, { underline: true });
+        doc.fontSize(8).font('Helvetica');
+        doc.moveDown(0.3);
+
+        keys.forEach(key => {
+          const value = item[key];
+          if (value !== undefined && value !== null) {
+            let displayValue = value;
+            if (typeof value === 'object') displayValue = JSON.stringify(value);
+            else if (typeof value === 'boolean') displayValue = value ? 'Yes' : 'No';
+            
+            if (String(displayValue).length > 80) {
+              displayValue = String(displayValue).substring(0, 77) + '...';
+            }
+            doc.text(`${key}: ${displayValue}`);
+          }
+        });
+        doc.moveDown(1);
+      });
+
+      doc.end(); // Finalize the PDF
+
+    } catch (err) {
+      reject(err);
+    }
+  });
+};
+
+// ---
+// EXPORT ENDPOINTS
+// ---
+
+app.post('/api/exports/prepare', verifyExportToken, async (req, res) => {
+  try {
+    const { user } = req;
+    const effectiveOrg = user.org;
+    const { collection, format = 'csv', fields } = req.body;
+
+    const allowedCollections = ['clients', 'volunteers', 'rides', 'destination', 'mileage_logs', 'audit_logs'];
     if (!allowedCollections.includes(collection)) {
       return res.status(400).json({ 
         success: false, 
@@ -1125,73 +1291,95 @@ app.get('/api/exports/:collection', async (req, res) => {
       });
     }
 
-    // Enforce auth and derive organization from JWT only
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ success: false, error: 'Authorization token required' });
+    // Fetch and process data
+    let data = await fetchDataFromFirestore(collection, effectiveOrg);
+
+    if (data.length === 0) {
+      return res.status(404).json({ success: false, error: 'No documents found in collection' });
     }
 
-    const token = authHeader.substring(7);
-    const verification = applicationLayer.verifyToken(token);
-    if (!verification.success) {
-      return res.status(401).json({ success: false, error: 'Invalid or expired token' });
-    }
+    data = filterDataByFields(data, fields);
 
-    const effectiveOrg = verification.user && verification.user.org;
-    if (!effectiveOrg) {
-      return res.status(400).json({ success: false, error: 'Organization information not found in token' });
-    }
+    // Generate file buffer
+    let fileBuffer;
+    let contentType;
+    let fileExtension;
 
-    // Fetch documents scoped to user's organization
-    let snapshot;
-    const collRef = db.collection(collection);
-    // Try common org field names in order of likelihood
-    snapshot = await collRef.where('organization', '==', effectiveOrg).get();
-    if (snapshot.empty) {
-      snapshot = await collRef.where('organization_id', '==', effectiveOrg).get();
-    }
-    if (snapshot.empty) {
-      snapshot = await collRef.where('organizationId', '==', effectiveOrg).get();
-    }
-    if (snapshot.empty && collection === 'organizations') {
-      // Organizations collection may use org_id or the doc id itself
-      snapshot = await collRef.where('org_id', '==', effectiveOrg).get();
-      if (snapshot.empty) {
-        const doc = await collRef.doc(effectiveOrg).get();
-        if (doc.exists) {
-          snapshot = { empty: false, docs: [doc], size: 1 };
-        }
+    if (format === 'csv') {
+      try {
+        const parser = new Parser();
+        const csv = parser.parse(data);
+        fileBuffer = Buffer.from(csv, 'utf8');
+        contentType = 'text/csv';
+        fileExtension = 'csv';
+      } catch (err) {
+        return res.status(500).json({ success: false, error: 'Failed to convert to CSV: ' + err.message });
       }
+    } else if (format === 'pdf') {
+      try {
+        fileBuffer = await generatePdfBuffer(data, collection);
+        contentType = 'application/pdf';
+        fileExtension = 'pdf';
+      } catch (err) {
+        return res.status(500).json({ success: false, error: 'Failed to convert to PDF: ' + err.message });
+      }
+    } else {
+      return res.status(400).json({ success: false, error: 'Invalid format. Supported formats are csv and pdf.' });
     }
 
-    if (snapshot.empty) {
+    // Upload file to GCS
+    const uniqueFilename = `exports/${user.userId || 'unknown'}/${collection}-${Date.now()}.${fileExtension}`;
+    const file = bucket.file(uniqueFilename);
+
+    await file.save(fileBuffer, {
+      metadata: { contentType: contentType }
+    });
+
+    // Generate and return signed URL
+    const [signedUrl] = await file.getSignedUrl({
+      action: 'read',
+      expires: Date.now() + 5 * 60 * 1000, // 5 minutes validity
+    });
+
+    res.status(200).json({
+      success: true,
+      downloadUrl: signedUrl
+    });
+
+  } catch (error) {
+    console.error('Export error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+app.get('/api/exports/:collection', verifyExportToken, async (req, res) => {
+  try {
+    const { collection } = req.params;
+    const { format = 'csv', fields } = req.query;
+    const effectiveOrg = req.user.org;
+
+    const allowedCollections = ['clients', 'volunteers', 'rides', 'destination', 'mileage_logs', 'audit_logs'];
+    if (!allowedCollections.includes(collection)) {
+      return res.status(400).json({ 
+        success: false, 
+        error: `Invalid collection. Allowed collections: ${allowedCollections.join(', ')}` 
+      });
+    }
+
+    let data = await fetchDataFromFirestore(collection, effectiveOrg);
+
+    if (data.length === 0) {
       return res.status(404).json({ 
         success: false, 
         error: 'No documents found in collection' 
       });
     }
 
-    // Extract data
-    let data = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    }));
+    data = filterDataByFields(data, fields);
 
-    // Filter fields if specified
-    if (fields) {
-      const fieldList = fields.split(',').map(f => f.trim());
-      data = data.map(item => {
-        const filtered = {};
-        fieldList.forEach(field => {
-          if (item.hasOwnProperty(field)) {
-            filtered[field] = item[field];
-          }
-        });
-        return filtered;
-      });
-    }
-
-    // Return in requested format
     if (format === 'csv') {
       try {
         const parser = new Parser();
@@ -1208,34 +1396,27 @@ app.get('/api/exports/:collection', async (req, res) => {
       }
     } else if (format === 'pdf') {
       try {
-        // Create a new PDF document
         const doc = new PDFDocument({ margin: 50 });
 
-        // Set response headers
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename="${collection}_export.pdf"`);
 
-        // Pipe the PDF to the response
         doc.pipe(res);
 
-        // Add title
         doc.fontSize(20).text(`${collection.charAt(0).toUpperCase() + collection.slice(1)} Export`, { align: 'center' });
         doc.moveDown();
         doc.fontSize(10).text(`Generated: ${new Date().toLocaleString()}`, { align: 'center' });
         doc.text(`Total Records: ${data.length}`, { align: 'center' });
         doc.moveDown(2);
 
-        // Get all unique keys from the data
         const allKeys = new Set();
         data.forEach(item => {
           Object.keys(item).forEach(key => allKeys.add(key));
         });
         const keys = Array.from(allKeys);
 
-        // Add data in a table-like format
         doc.fontSize(8);
         data.forEach((item, index) => {
-          // Add page break if needed
           if (doc.y > 700) {
             doc.addPage();
           }
@@ -1247,7 +1428,6 @@ app.get('/api/exports/:collection', async (req, res) => {
           keys.forEach(key => {
             const value = item[key];
             if (value !== undefined && value !== null) {
-              // Format value based on type
               let displayValue = value;
               if (typeof value === 'object') {
                 displayValue = JSON.stringify(value);
@@ -1255,7 +1435,6 @@ app.get('/api/exports/:collection', async (req, res) => {
                 displayValue = value ? 'Yes' : 'No';
               }
               
-              // Truncate long values
               if (String(displayValue).length > 80) {
                 displayValue = String(displayValue).substring(0, 77) + '...';
               }
@@ -1267,7 +1446,6 @@ app.get('/api/exports/:collection', async (req, res) => {
           doc.moveDown(1);
         });
         
-        // Finalize the PDF
         doc.end();
         
       } catch (err) {
