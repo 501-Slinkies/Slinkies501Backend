@@ -126,6 +126,226 @@ async function createPermission(permissionData) {
   }
 }
 
+async function getRolesByOrganization(orgId) {
+  const db = getFirestore();
+  try {
+    if (!orgId || (typeof orgId === 'string' && orgId.trim() === '')) {
+      return { success: false, error: 'Organization ID is required' };
+    }
+
+    const normalizedOrgId = typeof orgId === 'string' ? orgId.trim() : `${orgId}`;
+    const targets = ['roles', 'Roles', 'role', 'Role'];
+    const organizationsToMatch = [normalizedOrgId, 'default'];
+    const fieldsToCheck = [
+      'org',
+      'org_id',
+      'organization',
+      'organizationId',
+      'organization_id',
+      'OrganizationID',
+      'Organization'
+    ];
+
+    const roles = [];
+    const seen = new Set();
+
+    for (const collectionName of targets) {
+      const collectionRef = db.collection(collectionName);
+
+      for (const field of fieldsToCheck) {
+        for (const orgValue of organizationsToMatch) {
+          try {
+            const snapshot = await collectionRef
+              .where(field, '==', orgValue)
+              .get();
+
+            if (snapshot.empty) {
+              continue;
+            }
+
+            snapshot.forEach(doc => {
+              const dedupeKey = `${collectionName}:${doc.id}`;
+              if (seen.has(dedupeKey)) {
+                return;
+              }
+              seen.add(dedupeKey);
+              roles.push({
+                id: doc.id,
+                sourceCollection: collectionName,
+                matchedField: field,
+                matchedOrg: orgValue,
+                ...doc.data()
+              });
+            });
+          } catch (error) {
+            console.warn(`Error querying ${collectionName}.${field} for org ${orgValue}:`, error.message);
+          }
+        }
+      }
+    }
+
+    return { success: true, roles };
+  } catch (error) {
+    console.error('Error fetching roles by organization:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+async function getPermissionSetByRoleName(roleName) {
+  const db = getFirestore();
+  try {
+    if (!roleName || typeof roleName !== 'string' || roleName.trim() === '') {
+      return { success: false, error: 'Role name is required' };
+    }
+
+    const normalizedRoleName = roleName.trim();
+    const roleCollections = ['roles', 'Roles', 'role', 'Role'];
+
+    let roleDoc = null;
+    for (const collectionName of roleCollections) {
+      const doc = await db.collection(collectionName).doc(normalizedRoleName).get();
+      if (doc.exists) {
+        roleDoc = { id: doc.id, ...doc.data() };
+        break;
+      }
+    }
+
+    if (!roleDoc) {
+      const candidateFields = ['name', 'role_name', 'roleName', 'RoleName'];
+
+      for (const collectionName of roleCollections) {
+        for (const field of candidateFields) {
+          const snapshot = await db.collection(collectionName)
+            .where(field, '==', normalizedRoleName)
+            .limit(1)
+            .get();
+          if (!snapshot.empty) {
+            const doc = snapshot.docs[0];
+            roleDoc = { id: doc.id, ...doc.data() };
+            break;
+          }
+        }
+        if (roleDoc) {
+          break;
+        }
+      }
+    }
+
+    if (!roleDoc) {
+      return { success: false, error: 'Role not found' };
+    }
+
+    const permissionSetName = roleDoc.permission_set || roleDoc.permissionSet;
+    const parentRoleName = roleDoc.parent_role || roleDoc.parentRole || roleDoc.parentRoleName;
+
+    const fetchPermissionSet = async (identifier) => {
+      if (!identifier) {
+        return null;
+      }
+
+      if (typeof identifier === 'object' && typeof identifier.get === 'function') {
+        const snapshot = await identifier.get();
+        if (snapshot.exists) {
+          return { id: snapshot.id, ...snapshot.data() };
+        }
+        return null;
+      }
+
+      if (typeof identifier !== 'string') {
+        return null;
+      }
+
+      let trimmed = identifier.trim();
+      if (!trimmed) {
+        return null;
+      }
+
+      if (trimmed.startsWith('/')) {
+        trimmed = trimmed.replace(/^\/+/, '');
+      }
+
+      // Attempt direct doc path lookup
+      try {
+        const directDoc = await db.doc(trimmed).get();
+        if (directDoc.exists) {
+          return { id: directDoc.id, ...directDoc.data() };
+        }
+      } catch (error) {
+        console.warn(`Error fetching permission set via direct path ${trimmed}:`, error.message);
+      }
+
+      let collectionHint = null;
+      let permissionIdentifier = trimmed;
+      const segments = trimmed.split('/').filter(segment => segment.length > 0);
+      if (segments.length > 1) {
+        collectionHint = segments.slice(0, -1).join('/');
+        permissionIdentifier = segments[segments.length - 1];
+      }
+
+      const baseCollections = ['permissions', 'Permissions'];
+      const collectionsToCheck = collectionHint
+        ? Array.from(new Set([
+            collectionHint,
+            collectionHint.toLowerCase(),
+            collectionHint.charAt(0).toUpperCase() + collectionHint.slice(1),
+            ...baseCollections
+          ]))
+        : baseCollections;
+
+      for (const collectionName of collectionsToCheck) {
+        try {
+          const docRef = db.collection(collectionName).doc(permissionIdentifier);
+          const docSnapshot = await docRef.get();
+          if (docSnapshot.exists) {
+            return { id: docSnapshot.id, ...docSnapshot.data() };
+          }
+        } catch (error) {
+          console.warn(`Error fetching permission set ${permissionIdentifier} from ${collectionName}:`, error.message);
+        }
+      }
+
+      for (const collectionName of baseCollections) {
+        try {
+          const snapshot = await db.collection(collectionName)
+            .where('name', '==', permissionIdentifier)
+            .limit(1)
+            .get();
+          if (!snapshot.empty) {
+            const doc = snapshot.docs[0];
+            return { id: doc.id, ...doc.data() };
+          }
+        } catch (error) {
+          console.warn(`Error querying permission set ${permissionIdentifier} by name in ${collectionName}:`, error.message);
+        }
+      }
+
+      return null;
+    };
+
+    let permissionDoc = await fetchPermissionSet(permissionSetName);
+
+    if (!permissionDoc && parentRoleName) {
+      const parentResult = await getPermissionSetByRoleName(parentRoleName);
+      if (parentResult.success && parentResult.permissionSet) {
+        permissionDoc = parentResult.permissionSet;
+      }
+    }
+
+    if (!permissionDoc) {
+      return { success: false, error: 'Permission set not found' };
+    }
+
+    return {
+      success: true,
+      role: roleDoc,
+      permissionSet: permissionDoc
+    };
+  } catch (error) {
+    console.error('Error fetching permission set by role name:', error);
+    return { success: false, error: error.message };
+  }
+}
+
 async function getRoleByName(roleName) {
   const db = getFirestore();
 
@@ -1108,6 +1328,8 @@ module.exports = {
   createRole, 
   createPermission, 
   getRoleByName,
+  getRolesByOrganization,
+  getPermissionSetByRoleName,
   getAllVolunteers, 
   getVolunteersByOrganization,
   getVolunteerById,
