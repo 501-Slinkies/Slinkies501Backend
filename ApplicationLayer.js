@@ -1200,6 +1200,619 @@ function calculateTimeframeFromTimestamps(pickupTime, appointmentTime, estimated
   };
 }
 
+function getWeekBounds(date) {
+  if (!(date instanceof Date) || isNaN(date)) {
+    return null;
+  }
+
+  const start = new Date(date);
+  start.setHours(0, 0, 0, 0);
+  const day = start.getDay(); // Sunday = 0
+  start.setDate(start.getDate() - day);
+
+  const end = new Date(start);
+  end.setDate(end.getDate() + 6);
+  end.setHours(23, 59, 59, 999);
+
+  return { start, end };
+}
+
+function extractAssignedDriverIdentifiers(ride) {
+  if (!ride || typeof ride !== 'object') {
+    return [];
+  }
+
+  const identifiers = new Set();
+
+  const addIdentifier = (value) => {
+    if (!value) {
+      return;
+    }
+
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed) {
+        return;
+      }
+      identifiers.add(trimmed);
+      if (trimmed.includes('/')) {
+        const parts = trimmed.split('/').filter(Boolean);
+        const last = parts[parts.length - 1];
+        if (last) {
+          identifiers.add(last.trim());
+        }
+      }
+      return;
+    }
+
+    if (typeof value === 'object') {
+      if (typeof value.id === 'string') {
+        addIdentifier(value.id);
+      }
+      if (typeof value.path === 'string') {
+        addIdentifier(value.path);
+      }
+      if (typeof value.uid === 'string') {
+        addIdentifier(value.uid);
+      }
+      if (typeof value.UID === 'string') {
+        addIdentifier(value.UID);
+      }
+    }
+  };
+
+  addIdentifier(ride.assignedTo);
+  addIdentifier(ride.assigned_to);
+  addIdentifier(ride.driverUID);
+  addIdentifier(ride.driverUid);
+  addIdentifier(ride.DriverUID);
+  addIdentifier(ride.driverId);
+  addIdentifier(ride.driver_id);
+  addIdentifier(ride.driverVolunteerId);
+  addIdentifier(ride.driverVolunteerUID);
+  addIdentifier(ride.driver_volunteer_uid);
+  addIdentifier(ride.driver_volunteer_ref);
+  addIdentifier(ride.driver_volunteer_reference);
+  addIdentifier(ride.driverReference);
+  addIdentifier(ride.Driver);
+
+  return Array.from(identifiers);
+}
+
+function getVolunteerIdentifiers(volunteer) {
+  if (!volunteer || typeof volunteer !== 'object') {
+    return [];
+  }
+
+  const identifiers = new Set();
+
+  const addIdentifier = (value) => {
+    if (!value) {
+      return;
+    }
+
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed) {
+        return;
+      }
+      identifiers.add(trimmed);
+      if (trimmed.includes('/')) {
+        const parts = trimmed.split('/').filter(Boolean);
+        const last = parts[parts.length - 1];
+        if (last) {
+          identifiers.add(last.trim());
+        }
+      }
+      return;
+    }
+
+    if (typeof value === 'object') {
+      if (typeof value.id === 'string') {
+        addIdentifier(value.id);
+      }
+      if (typeof value.path === 'string') {
+        addIdentifier(value.path);
+      }
+    }
+  };
+
+  addIdentifier(volunteer.id);
+  addIdentifier(volunteer.uid);
+  addIdentifier(volunteer.UID);
+  addIdentifier(volunteer.user_ID);
+  addIdentifier(volunteer.userId);
+  addIdentifier(volunteer.volunteer_id);
+  addIdentifier(volunteer.volunteerId);
+  addIdentifier(volunteer.assignedTo);
+  addIdentifier(volunteer.referencePath);
+  addIdentifier(volunteer.documentPath);
+
+  return Array.from(identifiers);
+}
+
+function parseMaxRidesPerWeek(value) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  const numeric = typeof value === 'number' ? value : parseInt(value, 10);
+  if (!Number.isFinite(numeric) || isNaN(numeric)) {
+    return null;
+  }
+
+  return numeric;
+}
+
+const WEEKLY_LIMIT_EXCLUDED_STATUSES = new Set(['unassigned', 'canceled', 'cancelled', 'declined']);
+
+function shouldCountRideStatusForWeeklyLimit(status) {
+  if (!status) {
+    return true;
+  }
+
+  if (typeof status !== 'string') {
+    return true;
+  }
+
+  const normalized = status.toLowerCase();
+  return !WEEKLY_LIMIT_EXCLUDED_STATUSES.has(normalized);
+}
+
+async function getAssignedRideCountsByDriver(weekStart, weekEnd, excludeRideIdentifiers = []) {
+  if (!(weekStart instanceof Date) || isNaN(weekStart) || !(weekEnd instanceof Date) || isNaN(weekEnd)) {
+    return {};
+  }
+
+  try {
+    const excludeSet = new Set();
+    (excludeRideIdentifiers || []).forEach(identifier => {
+      if (identifier === undefined || identifier === null) {
+        return;
+      }
+      const normalized = `${identifier}`.trim();
+      if (normalized) {
+        excludeSet.add(normalized);
+      }
+    });
+
+    const rides = await dataAccess.fetchRidesInRange(weekStart, weekEnd);
+    const counts = {};
+
+    for (const ride of rides) {
+      const rideIdentifiers = [
+        ride?.id,
+        ride?.UID,
+        ride?.uid,
+        ride?.RideID,
+        ride?.ride_id
+      ];
+      const shouldSkipRide = rideIdentifiers.some(identifier => {
+        if (identifier === undefined || identifier === null) {
+          return false;
+        }
+        const normalized = `${identifier}`.trim();
+        return normalized && excludeSet.has(normalized);
+      });
+      if (shouldSkipRide) {
+        continue;
+      }
+
+      const driverIdentifiers = extractAssignedDriverIdentifiers(ride);
+      if (driverIdentifiers.length === 0) {
+        continue;
+      }
+
+      const status = ride?.status || ride?.Status || ride?.ride_status;
+      if (!shouldCountRideStatusForWeeklyLimit(status)) {
+        continue;
+      }
+
+      let rideStart = null;
+      const timeframe = calculateRideTimeframe(ride);
+      if (timeframe && timeframe.startTime instanceof Date && !isNaN(timeframe.startTime)) {
+        rideStart = timeframe.startTime;
+      } else if (ride?.Date) {
+        const parsed = new Date(ride.Date);
+        if (!isNaN(parsed)) {
+          rideStart = parsed;
+        }
+      } else if (ride?.date) {
+        const parsed = new Date(ride.date);
+        if (!isNaN(parsed)) {
+          rideStart = parsed;
+        }
+      }
+
+      if (!rideStart || rideStart < weekStart || rideStart > weekEnd) {
+        continue;
+      }
+
+      const uniqueIdentifiers = new Set(driverIdentifiers);
+      for (const identifier of uniqueIdentifiers) {
+        counts[identifier] = (counts[identifier] || 0) + 1;
+      }
+    }
+
+    return counts;
+  } catch (error) {
+    console.error('Error computing assigned ride counts by driver:', error);
+    return {};
+  }
+}
+
+function getWeeklyAssignmentCountForVolunteer(volunteer, countsByDriver) {
+  if (!countsByDriver || typeof countsByDriver !== 'object') {
+    return 0;
+  }
+
+  const identifiers = getVolunteerIdentifiers(volunteer);
+  if (identifiers.length === 0) {
+    return 0;
+  }
+
+  let maxCount = 0;
+  for (const identifier of identifiers) {
+    const count = countsByDriver[identifier];
+    if (typeof count === 'number' && count > maxCount) {
+      maxCount = count;
+    }
+  }
+
+  return maxCount;
+}
+
+async function getDriverRides(volunteerId, authToken = null) {
+  try {
+    if (!volunteerId || (typeof volunteerId === 'string' && volunteerId.trim() === '')) {
+      return {
+        success: false,
+        message: 'Volunteer ID is required'
+      };
+    }
+
+    const addIdentifier = (identifier, set) => {
+      if (identifier === undefined || identifier === null) {
+        return;
+      }
+      const str = typeof identifier === 'string' ? identifier : `${identifier}`;
+      const trimmed = str.trim();
+      if (!trimmed) {
+        return;
+      }
+      set.add(trimmed);
+      if (trimmed.includes('/')) {
+        const parts = trimmed.split('/').filter(Boolean);
+        const last = parts[parts.length - 1];
+        if (last) {
+          set.add(last.trim());
+        }
+      }
+    };
+
+    const identifierSet = new Set();
+    addIdentifier(volunteerId, identifierSet);
+
+    let volunteer = null;
+    const primaryLookup = await dataAccess.getUserById(volunteerId);
+    if (primaryLookup.success && primaryLookup.user) {
+      volunteer = primaryLookup.user;
+    } else {
+      const fallbackLookup = await dataAccess.getUserByUserID(volunteerId);
+      if (fallbackLookup.success && fallbackLookup.user) {
+        volunteer = fallbackLookup.user;
+        addIdentifier(fallbackLookup.user.id, identifierSet);
+      }
+    }
+
+    if (volunteer) {
+      const volunteerIdentifiers = getVolunteerIdentifiers(volunteer);
+      volunteerIdentifiers.forEach(identifier => addIdentifier(identifier, identifierSet));
+    }
+
+    if (identifierSet.size === 0) {
+      return {
+        success: false,
+        message: 'Unable to determine identifiers for volunteer'
+      };
+    }
+
+    const ridesResult = await dataAccess.getRidesByDriverIdentifiers(Array.from(identifierSet));
+    if (!ridesResult.success) {
+      return {
+        success: false,
+        message: ridesResult.error || 'Failed to fetch rides for volunteer'
+      };
+    }
+
+    const rides = Array.isArray(ridesResult.rides) ? ridesResult.rides : [];
+    rides.sort((a, b) => {
+      const dateA = a.Date || a.date || a.appointmentTime || a.appointment_time || a.pickupTime || a.pickupTme;
+      const dateB = b.Date || b.date || b.appointmentTime || b.appointment_time || b.pickupTime || b.pickupTme;
+
+      const toMillis = (value) => {
+        if (!value) {
+          return 0;
+        }
+        if (value instanceof Date) {
+          return value.getTime();
+        }
+        if (typeof value === 'object' && typeof value.toDate === 'function') {
+          return value.toDate().getTime();
+        }
+        const parsed = new Date(value);
+        if (!isNaN(parsed)) {
+          return parsed.getTime();
+        }
+        return 0;
+      };
+
+      return toMillis(dateB) - toMillis(dateA);
+    });
+
+    return {
+      success: true,
+      message: `Found ${rides.length} ride${rides.length === 1 ? '' : 's'} for volunteer`,
+      data: {
+        driverFirestoreId: volunteer ? volunteer.id : (typeof volunteerId === 'string' ? volunteerId.trim() : `${volunteerId}`),
+        driver: volunteer,
+        identifiersQueried: Array.from(identifierSet),
+        identifiersMatched: ridesResult.matchedIdentifiers || [],
+        total: rides.length,
+        rides
+      }
+    };
+  } catch (error) {
+    console.error('Error in getDriverRides:', error);
+    return {
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    };
+  }
+}
+
+async function getRolesForOrganization(orgId) {
+  try {
+    if (!orgId || (typeof orgId === 'string' && orgId.trim() === '')) {
+      return {
+        success: false,
+        message: 'Organization ID is required'
+      };
+    }
+
+    const sanitizedOrgId = typeof orgId === 'string' ? orgId.trim() : `${orgId}`;
+    const result = await dataAccess.getRolesByOrganization(sanitizedOrgId);
+    if (!result.success) {
+      return {
+        success: false,
+        message: result.error || 'Failed to fetch roles for organization'
+      };
+    }
+
+    return {
+      success: true,
+      organizationId: sanitizedOrgId,
+      total: result.roles.length,
+      roles: result.roles
+    };
+  } catch (error) {
+    console.error('Error in getRolesForOrganization:', error);
+    return {
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    };
+  }
+}
+
+async function getPermissionSetByRoleName(roleName) {
+  try {
+    if (!roleName || (typeof roleName === 'string' && roleName.trim() === '')) {
+      return {
+        success: false,
+        message: 'Role name is required'
+      };
+    }
+
+    const normalizedRoleName = typeof roleName === 'string' ? roleName.trim() : `${roleName}`;
+    const result = await dataAccess.getPermissionSetByRoleName(normalizedRoleName);
+    if (!result.success) {
+      return {
+        success: false,
+        message: result.error || 'Failed to fetch permission set for role'
+      };
+    }
+
+    return {
+      success: true,
+      role: result.role,
+      permissionSet: result.permissionSet
+    };
+  } catch (error) {
+    console.error('Error in getPermissionSetByRoleName:', error);
+    return {
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    };
+  }
+}
+
+function parsePreferenceList(value) {
+  if (!value) {
+    return [];
+  }
+
+  let items = [];
+  if (Array.isArray(value)) {
+    items = value;
+  } else if (typeof value === 'string') {
+    items = value.split(/[,;|]/);
+  } else {
+    return [];
+  }
+
+  return items
+    .map(item => {
+      if (item === undefined || item === null) {
+        return '';
+      }
+      const str = typeof item === 'string' ? item : `${item}`;
+      return str.trim();
+    })
+    .filter(str => str.length > 0);
+}
+
+function getTownCandidatesForPreferences(client, ride, destinationTown) {
+  const candidates = new Set();
+  const addCandidate = (value) => {
+    if (!value) {
+      return;
+    }
+    const str = typeof value === 'string' ? value : `${value}`;
+    const trimmed = str.trim();
+    if (trimmed.length > 0) {
+      candidates.add(trimmed);
+    }
+  };
+
+  addCandidate(destinationTown);
+
+  if (client && typeof client === 'object') {
+    addCandidate(client.city);
+    addCandidate(client.town);
+    addCandidate(client.home_town);
+    addCandidate(client.homeTown);
+    addCandidate(client.residence_town);
+    addCandidate(client.residenceTown);
+  }
+
+  const startLocation = ride?.startLocation || ride?.start_location;
+  const processLocation = (location) => {
+    if (!location) {
+      return;
+    }
+    if (typeof location === 'string') {
+      addCandidate(location);
+    } else if (typeof location === 'object') {
+      addCandidate(location.town);
+      addCandidate(location.city);
+      addCandidate(location.name);
+      addCandidate(location.label);
+    }
+  };
+  processLocation(startLocation);
+  processLocation(ride?.pickupLocation || ride?.pickup_location);
+
+  addCandidate(ride?.pickupTown || ride?.pickup_town);
+  addCandidate(ride?.startTown || ride?.start_town);
+
+  return Array.from(candidates);
+}
+
+function getClientIdentifiersForPreferences(client) {
+  const identifiers = new Set();
+  const addIdentifier = (value) => {
+    if (!value) {
+      return;
+    }
+    const str = typeof value === 'string' ? value : `${value}`;
+    const trimmed = str.trim();
+    if (trimmed.length > 0) {
+      identifiers.add(trimmed);
+    }
+  };
+
+  if (!client || typeof client !== 'object') {
+    return Array.from(identifiers);
+  }
+
+  addIdentifier(client.UID);
+  addIdentifier(client.uid);
+  addIdentifier(client.clientUID);
+  addIdentifier(client.client_uid);
+  addIdentifier(client.clientId);
+  addIdentifier(client.client_id);
+  addIdentifier(client.id);
+
+  const firstName = client.first_name ?? client.firstName ?? '';
+  const lastName = client.last_name ?? client.lastName ?? '';
+  const preferredName = client.preferred_name ?? client.preferredName ?? '';
+
+  const fullName = [firstName, lastName].filter(Boolean).join(' ').trim();
+  if (fullName) {
+    addIdentifier(fullName);
+  }
+
+  const reversedName = [lastName, firstName].filter(Boolean).join(', ').trim();
+  if (reversedName) {
+    addIdentifier(reversedName);
+  }
+
+  if (preferredName) {
+    addIdentifier(preferredName);
+    if (lastName) {
+      addIdentifier(`${preferredName} ${lastName}`);
+      addIdentifier(`${lastName}, ${preferredName}`);
+    }
+  }
+
+  return Array.from(identifiers);
+}
+
+function getVolunteerPreferenceMessages(volunteer, client, ride, destinationTown) {
+  if (!volunteer || typeof volunteer !== 'object') {
+    return [];
+  }
+
+  const messages = [];
+
+  const townPreferences = parsePreferenceList(volunteer.town_preference);
+  if (townPreferences.length > 0) {
+    const normalizedTownPrefs = townPreferences.map(pref => ({
+      value: pref,
+      normalized: pref.toLowerCase()
+    }));
+
+    const townCandidates = getTownCandidatesForPreferences(client, ride, destinationTown);
+    const matchedTownPrefs = new Set();
+
+    for (const candidate of townCandidates) {
+      const normalizedCandidate = candidate.toLowerCase();
+      const match = normalizedTownPrefs.find(pref => pref.normalized === normalizedCandidate);
+      if (match && !matchedTownPrefs.has(match.normalized)) {
+        matchedTownPrefs.add(match.normalized);
+        messages.push(`Matches volunteer town preference (${match.value})`);
+      }
+    }
+  }
+
+  const clientPreferences = parsePreferenceList(volunteer.client_preference_for_drivers);
+  if (clientPreferences.length > 0 && client) {
+    const normalizedClientPrefs = clientPreferences.map(pref => ({
+      value: pref,
+      normalized: pref.toLowerCase()
+    }));
+
+    const clientIdentifiers = getClientIdentifiersForPreferences(client).map(identifier => ({
+      value: identifier,
+      normalized: identifier.toLowerCase()
+    }));
+
+    const matchedClientPrefs = new Set();
+    for (const identifier of clientIdentifiers) {
+      const match = normalizedClientPrefs.find(pref => pref.normalized === identifier.normalized);
+      if (match && !matchedClientPrefs.has(match.normalized)) {
+        matchedClientPrefs.add(match.normalized);
+        messages.push(`Volunteer has this client in preferred list (${match.value})`);
+      }
+    }
+  }
+
+  return messages;
+}
+
 // Helper function to extract day and time from ride date/time (legacy function for backward compatibility)
 function parseRideDateTime(rideDate, rideTime) {
   if (!rideDate || !rideTime) {
@@ -1521,6 +2134,18 @@ async function matchDriversForRide(rideId) {
         message: 'Invalid ride data: Missing PickupTime, AppointmentTime, EstimatedDuration, or TripType'
       };
     }
+
+    const weekBounds = getWeekBounds(rideTimeframe.startTime);
+    let weeklyAssignedCounts = {};
+    if (weekBounds) {
+      weeklyAssignedCounts = await getAssignedRideCountsByDriver(
+        weekBounds.start,
+        weekBounds.end,
+        [ride.id, ride.UID, ride.uid, ride.RideID, ride.ride_id]
+      );
+    } else {
+      console.warn(`Unable to determine week bounds for ride ${ride.UID || ride.id}`);
+    }
     
     // COMMENTED OUT: Organization matching - using all volunteers for testing
     // const organizationId = ride.OrganizationID || ride.organization;
@@ -1578,6 +2203,31 @@ async function matchDriversForRide(rideId) {
       
       // Include active volunteers who are not on leave (or whose leave has ended)
       if (isActive && !isOnLeave) {
+        const weeklyAssignedCount = getWeeklyAssignmentCountForVolunteer(volunteer, weeklyAssignedCounts);
+        const maxRidesPerWeek = parseMaxRidesPerWeek(volunteer.max_rides_week ?? volunteer.max_rides_per_week);
+
+        if (maxRidesPerWeek !== null && maxRidesPerWeek > 0 && weeklyAssignedCount >= maxRidesPerWeek) {
+          unavailable.push({
+            id: volunteer.id,
+            name: `${volunteer.first_name} ${volunteer.last_name}`,
+            email: volunteer.email_address,
+            phone: volunteer.primary_phone,
+            vehicle: volunteer.type_of_vehicle,
+            maxRidesPerWeek: volunteer.max_rides_week,
+            currentWeekRideCount: weeklyAssignedCount,
+            availability: volunteer.driver_availability_by_day_and_time,
+            oxygen: volunteer.oxygen || false,
+            mobility_accommodation: volunteer.mobility_accommodation || '',
+            accepts_service_animal: volunteer.accepts_service_animal || false,
+            destination_limitations: volunteer.destination_limitations || '',
+            allergens_in_car: volunteer.allergens_in_car || '',
+            reason: `Driver has reached weekly ride limit (${weeklyAssignedCount}/${maxRidesPerWeek})`
+          });
+          continue;
+        }
+
+        const preferenceMatches = getVolunteerPreferenceMessages(volunteer, client, ride, destinationTown);
+
         // Check destination limitations against both destination town and client's city
         const limitations = volunteer.destination_limitations || '';
         if (limitations && typeof limitations === 'string') {
@@ -1613,13 +2263,15 @@ async function matchDriversForRide(rideId) {
               phone: volunteer.primary_phone,
               vehicle: volunteer.type_of_vehicle,
               maxRidesPerWeek: volunteer.max_rides_week,
+              currentWeekRideCount: weeklyAssignedCount,
               availability: volunteer.driver_availability_by_day_and_time,
               oxygen: volunteer.oxygen || false,
               mobility_accommodation: volunteer.mobility_accommodation || '',
               accepts_service_animal: volunteer.accepts_service_animal || false,
               destination_limitations: volunteer.destination_limitations || '',
               allergens_in_car: volunteer.allergens_in_car || '',
-              reason: limitationReason
+              reason: limitationReason,
+              preferenceMatches
             });
             continue; // Skip to next volunteer
           }
@@ -1636,18 +2288,20 @@ async function matchDriversForRide(rideId) {
               phone: volunteer.primary_phone,
               vehicle: volunteer.type_of_vehicle,
               maxRidesPerWeek: volunteer.max_rides_week,
+              currentWeekRideCount: weeklyAssignedCount,
               availability: volunteer.driver_availability_by_day_and_time,
               oxygen: volunteer.oxygen || false,
               mobility_accommodation: volunteer.mobility_accommodation || '',
               accepts_service_animal: volunteer.accepts_service_animal || false,
               destination_limitations: volunteer.destination_limitations || '',
               allergens_in_car: volunteer.allergens_in_car || '',
-              reason: criteriaMatch.reason
+              reason: criteriaMatch.reason,
+              preferenceMatches
             });
             continue; // Skip to next volunteer
           }
         } else {
-          console.warn(`Skipping client-volunteer matching for ride ${rideId} - client not found`);
+          console.warn(`Skipping client-volunteer matching for ride ${ride.UID || ride.id} - client not found`);
         }
         
         // Check availability for timeframe
@@ -1661,12 +2315,14 @@ async function matchDriversForRide(rideId) {
             phone: volunteer.primary_phone,
             vehicle: volunteer.type_of_vehicle,
             maxRidesPerWeek: volunteer.max_rides_week,
+            currentWeekRideCount: weeklyAssignedCount,
             availability: volunteer.driver_availability_by_day_and_time,
             oxygen: volunteer.oxygen || false,
             mobility_accommodation: volunteer.mobility_accommodation || '',
             accepts_service_animal: volunteer.accepts_service_animal || false,
             destination_limitations: volunteer.destination_limitations || '',
-            allergens_in_car: volunteer.allergens_in_car || ''
+            allergens_in_car: volunteer.allergens_in_car || '',
+            preferenceMatches
           });
         } else {
           let reason = 'Not available during requested timeframe';
@@ -1693,13 +2349,15 @@ async function matchDriversForRide(rideId) {
             phone: volunteer.primary_phone,
             vehicle: volunteer.type_of_vehicle,
             maxRidesPerWeek: volunteer.max_rides_week,
+            currentWeekRideCount: weeklyAssignedCount,
             availability: volunteer.driver_availability_by_day_and_time,
             oxygen: volunteer.oxygen || false,
             mobility_accommodation: volunteer.mobility_accommodation || '',
             accepts_service_animal: volunteer.accepts_service_animal || false,
             destination_limitations: volunteer.destination_limitations || '',
             allergens_in_car: volunteer.allergens_in_car || '',
-            reason
+            reason,
+            preferenceMatches
           });
         }
       }
@@ -1852,6 +2510,8 @@ async function matchDriversForRideByUID(uid) {
       // Check status case-insensitively (Active, active, ACTIVE, etc.)
       const status = volunteer.volunteering_status ? volunteer.volunteering_status.toLowerCase() : '';
       if (status === 'active') {
+        const preferenceMatches = getVolunteerPreferenceMessages(volunteer, client, ride, destinationTown);
+
         // Check destination limitations against both destination town and client's city
         const limitations = volunteer.destination_limitations || '';
         if (limitations && typeof limitations === 'string') {
@@ -1891,7 +2551,8 @@ async function matchDriversForRideByUID(uid) {
               accepts_service_animal: volunteer.accepts_service_animal || false,
               destination_limitations: volunteer.destination_limitations || '',
               allergens_in_car: volunteer.allergens_in_car || '',
-              reason: limitationReason
+              reason: limitationReason,
+              preferenceMatches
             });
             continue; // Skip to next volunteer
           }
@@ -1912,7 +2573,8 @@ async function matchDriversForRideByUID(uid) {
               accepts_service_animal: volunteer.accepts_service_animal || false,
               destination_limitations: volunteer.destination_limitations || '',
               allergens_in_car: volunteer.allergens_in_car || '',
-              reason: criteriaMatch.reason
+              reason: criteriaMatch.reason,
+              preferenceMatches
             });
             continue; // Skip to next volunteer
           }
@@ -1934,7 +2596,8 @@ async function matchDriversForRideByUID(uid) {
             mobility_accommodation: volunteer.mobility_accommodation || '',
             accepts_service_animal: volunteer.accepts_service_animal || false,
             destination_limitations: volunteer.destination_limitations || '',
-            allergens_in_car: volunteer.allergens_in_car || ''
+            allergens_in_car: volunteer.allergens_in_car || '',
+            preferenceMatches
           });
         } else {
           let reason = 'Not available during requested timeframe';
@@ -1965,7 +2628,8 @@ async function matchDriversForRideByUID(uid) {
             accepts_service_animal: volunteer.accepts_service_animal || false,
             destination_limitations: volunteer.destination_limitations || '',
             allergens_in_car: volunteer.allergens_in_car || '',
-            reason
+            reason,
+            preferenceMatches
           });
         }
       }
@@ -2805,6 +3469,9 @@ module.exports = {
   verifyToken, 
   createRide,
   matchDriversForRide,
+  getDriverRides,
+  getRolesForOrganization,
+  getPermissionSetByRoleName,
   matchDriversForRideByUID,
   addVolunteerUnavailability,
   getRideAppointmentInfo,

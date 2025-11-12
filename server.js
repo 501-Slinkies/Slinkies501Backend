@@ -871,6 +871,62 @@ app.delete('/api/organizations/:orgId', async (req, res) => {
   }
 });
 
+// Get roles for an organization (including default roles)
+app.get('/api/organizations/:orgId/roles', async (req, res) => {
+  try {
+    const { orgId } = req.params;
+    const result = await applicationLayer.getRolesForOrganization(orgId);
+
+    if (result.success) {
+      return res.status(200).send(result);
+    }
+
+    let statusCode = 400;
+    if (result.message && result.message.toLowerCase().includes('not found')) {
+      statusCode = 404;
+    } else if (result.message && result.message.toLowerCase().includes('required')) {
+      statusCode = 400;
+    }
+
+    return res.status(statusCode).send(result);
+  } catch (error) {
+    console.error('Error in GET /api/organizations/:orgId/roles endpoint:', error);
+    return res.status(500).send({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+});
+
+// Get permission set details for a specific role name
+app.get('/api/roles/:roleName/permission-set', async (req, res) => {
+  try {
+    const { roleName } = req.params;
+    const result = await applicationLayer.getPermissionSetByRoleName(roleName);
+
+    if (result.success) {
+      return res.status(200).send(result);
+    }
+
+    let statusCode = 400;
+    if (result.message && result.message.toLowerCase().includes('not found')) {
+      statusCode = 404;
+    } else if (result.message && result.message.toLowerCase().includes('required')) {
+      statusCode = 400;
+    }
+
+    return res.status(statusCode).send(result);
+  } catch (error) {
+    console.error('Error in GET /api/roles/:roleName/permission-set endpoint:', error);
+    return res.status(500).send({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+});
+
 // Get all rides for a specific driver
 app.get('/api/drivers/:driverID/rides', async (req, res) => {
   try {
