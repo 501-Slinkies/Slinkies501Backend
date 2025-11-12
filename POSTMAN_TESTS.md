@@ -519,3 +519,111 @@ pm.test("identifiers tracked", () => pm.expect(body?.data?.identifiersQueried).t
 
 These tests cover both populated and empty ride assignments. When using a volunteer ID with no rides, the API still returns `success: true` and an empty `rides` array, making it safe to include this test in automated smoke checks.
 
+---
+
+# Role & Permission Tests
+
+## 1. Get Roles for Organization (GET)
+
+### Endpoint
+```
+GET /api/organizations/:orgId/roles
+```
+
+### Example Request
+```bash
+curl --location --request GET "http://localhost:3000/api/organizations/ORG-001/roles" \
+  --header "Authorization: Bearer {{token}}"
+```
+
+### Expected Response (Success - 200)
+```json
+{
+  "success": true,
+  "organizationId": "ORG-001",
+  "total": 4,
+  "roles": [
+    {
+      "id": "dispatcher",
+      "title": "Dispatcher",
+      "org": "ORG-001",
+      "permission_set": "dispatcher",
+      "sourceCollection": "roles"
+    },
+    {
+      "id": "driver",
+      "title": "Driver",
+      "org": "default",
+      "permission_set": "driver",
+      "sourceCollection": "roles"
+    }
+  ]
+}
+```
+
+### Postman Tests
+```javascript
+pm.test("status is 200", () => pm.response.to.have.status(200));
+
+const body = pm.response.json();
+pm.test("response succeeded", () => pm.expect(body.success).to.be.true);
+pm.test("roles array returned", () => pm.expect(body.roles).to.be.an("array"));
+pm.test("defaults included", () => pm.expect(body.roles.some(r => r.org === "default")).to.be.true);
+```
+
+If the organization has no custom roles, the API still returns default ones (if defined); otherwise `roles` can be empty with `success: true`.
+
+## 2. Get Permission Set for Role (GET)
+
+### Endpoint
+```
+GET /api/roles/:roleName/permission-set
+```
+
+### Example Request
+```bash
+curl --location --request GET "http://localhost:3000/api/roles/dispatcher/permission-set" \
+  --header "Authorization: Bearer {{token}}"
+```
+
+### Expected Response (Success - 200)
+```json
+{
+  "success": true,
+  "role": {
+    "id": "dispatcher",
+    "title": "Dispatcher",
+    "org": "ORG-001",
+    "permission_set": "dispatcher"
+  },
+  "permissionSet": {
+    "id": "dispatcher",
+    "create_rides": true,
+    "read_rides": true,
+    "update_rides": true,
+    "delete_rides": false,
+    "...": "..."
+  }
+}
+```
+
+### Expected Response (Role Not Found - 404)
+```json
+{
+  "success": false,
+  "message": "Role not found"
+}
+```
+
+### Postman Tests
+```javascript
+pm.test("status is 200", () => pm.response.to.have.status(200));
+
+const json = pm.response.json();
+pm.test("lookup succeeded", () => pm.expect(json.success).to.be.true);
+pm.test("permission set present", () => pm.expect(json.permissionSet).to.be.an("object"));
+pm.test("role metadata returned", () => pm.expect(json.role).to.be.an("object"));
+```
+
+Use this request to validate that the permission set referenced by each role is present and that the fields you expect in the permissions document are returned.
+

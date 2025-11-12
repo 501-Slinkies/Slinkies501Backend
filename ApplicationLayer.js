@@ -1572,6 +1572,73 @@ async function getDriverRides(volunteerId, authToken = null) {
   }
 }
 
+async function getRolesForOrganization(orgId) {
+  try {
+    if (!orgId || (typeof orgId === 'string' && orgId.trim() === '')) {
+      return {
+        success: false,
+        message: 'Organization ID is required'
+      };
+    }
+
+    const sanitizedOrgId = typeof orgId === 'string' ? orgId.trim() : `${orgId}`;
+    const result = await dataAccess.getRolesByOrganization(sanitizedOrgId);
+    if (!result.success) {
+      return {
+        success: false,
+        message: result.error || 'Failed to fetch roles for organization'
+      };
+    }
+
+    return {
+      success: true,
+      organizationId: sanitizedOrgId,
+      total: result.roles.length,
+      roles: result.roles
+    };
+  } catch (error) {
+    console.error('Error in getRolesForOrganization:', error);
+    return {
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    };
+  }
+}
+
+async function getPermissionSetByRoleName(roleName) {
+  try {
+    if (!roleName || (typeof roleName === 'string' && roleName.trim() === '')) {
+      return {
+        success: false,
+        message: 'Role name is required'
+      };
+    }
+
+    const normalizedRoleName = typeof roleName === 'string' ? roleName.trim() : `${roleName}`;
+    const result = await dataAccess.getPermissionSetByRoleName(normalizedRoleName);
+    if (!result.success) {
+      return {
+        success: false,
+        message: result.error || 'Failed to fetch permission set for role'
+      };
+    }
+
+    return {
+      success: true,
+      role: result.role,
+      permissionSet: result.permissionSet
+    };
+  } catch (error) {
+    console.error('Error in getPermissionSetByRoleName:', error);
+    return {
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    };
+  }
+}
+
 function parsePreferenceList(value) {
   if (!value) {
     return [];
@@ -3403,6 +3470,8 @@ module.exports = {
   createRide,
   matchDriversForRide,
   getDriverRides,
+  getRolesForOrganization,
+  getPermissionSetByRoleName,
   matchDriversForRideByUID,
   addVolunteerUnavailability,
   getRideAppointmentInfo,
