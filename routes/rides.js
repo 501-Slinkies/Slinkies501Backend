@@ -199,14 +199,14 @@ router.post("/assign-driver", async (req, res) => {
 /**
  * ============================================================================
  * ✅ POST /api/rides/set-driver
- * Sets the Driverid field in a ride document
+ * Sets the driverUID field in a ride document
  * 
  * Body: {
  *   "driverId": "driver123",
  *   "rideId": "ride456"
  * }
  * 
- * This is different from assigning - it directly sets the Driverid field
+ * This is different from assigning - it directly sets the driverUID field
  * ============================================================================
  */
 router.post("/set-driver", async (req, res) => {
@@ -231,9 +231,9 @@ router.post("/set-driver", async (req, res) => {
       });
     }
 
-    // Prepare update data - set Driverid field
+    // Prepare update data - set driverUID field
     const updateData = {
-      Driverid: driverId
+      driverUID: driverId
     };
 
     // Update the ride
@@ -242,7 +242,7 @@ router.post("/set-driver", async (req, res) => {
     if (updateResult.success) {
       res.status(200).json({
         success: true,
-        message: "Driverid field updated successfully",
+        message: "driverUID field updated successfully",
         ride: {
           rideId: rideId,
           driverId: driverId,
@@ -262,6 +262,121 @@ router.post("/set-driver", async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Server error setting driver in ride.",
+      error: error.message
+    });
+  }
+});
+
+/**
+ * ============================================================================
+ * ✅ GET /api/rides/by-driver
+ * Returns rides for a specific driver within an organization
+ * 
+ * Query params: {
+ *   "orgId": "org123",
+ *   "driverId": "zvco96u8CWM2ryR1CyKvyJ17VHC3"
+ * }
+ * 
+ * The driverId is checked against the driverUID field in ride documents.
+ * The driverUID field is a comma-separated list of driver IDs.
+ * If the driverId matches any ID in that list, the ride is returned.
+ * ============================================================================
+ */
+router.get("/by-driver", async (req, res) => {
+  try {
+    const { orgId, driverId } = req.query;
+
+    // Validate required fields
+    if (!orgId || !driverId) {
+      return res.status(400).json({
+        success: false,
+        message: "orgId and driverId are required as query parameters"
+      });
+    }
+
+    // Query rides by organization
+    // Try multiple possible organization field names
+    const orgFields = ['organization', 'organizationId', 'organization_id', 'OrganizationID', 'org', 'org_id'];
+    let ridesSnapshot = null;
+    let foundRides = false;
+
+    for (const field of orgFields) {
+      try {
+        ridesSnapshot = await db.collection("rides")
+          .where(field, "==", orgId)
+          .get();
+        
+        if (!ridesSnapshot.empty) {
+          foundRides = true;
+          break;
+        }
+      } catch (error) {
+        // Try next field
+        continue;
+      }
+    }
+
+    // If no rides found in "rides" collection, try "Rides" (capital R)
+    if (!foundRides) {
+      for (const field of orgFields) {
+        try {
+          ridesSnapshot = await db.collection("Rides")
+            .where(field, "==", orgId)
+            .get();
+          
+          if (!ridesSnapshot.empty) {
+            foundRides = true;
+            break;
+          }
+        } catch (error) {
+          // Try next field
+          continue;
+        }
+      }
+    }
+
+    if (!foundRides || !ridesSnapshot) {
+      return res.json({
+        success: true,
+        rides: [],
+        count: 0,
+        message: "No rides found for the specified organization"
+      });
+    }
+
+    // Filter rides where driverUID contains the driverId
+    const matchingRides = [];
+    
+    ridesSnapshot.forEach(doc => {
+      const rideData = doc.data();
+      const driverUID = rideData.driverUID || rideData.driver_uid || rideData.DriverUID || "";
+      
+      if (driverUID) {
+        // Split the comma-separated string and check if driverId is in the list
+        const driverIds = driverUID.split(",").map(id => id.trim()).filter(id => id.length > 0);
+        
+        if (driverIds.includes(driverId)) {
+          matchingRides.push({
+            id: doc.id,
+            ...rideData
+          });
+        }
+      }
+    });
+
+    res.json({
+      success: true,
+      rides: matchingRides,
+      count: matchingRides.length,
+      orgId: orgId,
+      driverId: driverId
+    });
+
+  } catch (error) {
+    console.error("🔥 Error in by-driver endpoint:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error fetching rides by driver.",
       error: error.message
     });
   }
