@@ -6,69 +6,139 @@ const { db } = require("../firebase");
 const dataAccess = require("../DataAccessLayer");
 
 /**
- * ============================================================================
  * ✅ GET /api/rides/calendar
- * Returns rides formatted for calendar view
- * Supports filters: start, end, status, driver_id, organization
- *
- * Example:
- * /api/rides/calendar?start=2025-09-01&end=2025-12-31&status=unassigned
- * ============================================================================
+ * Robust lookups for client/dispatcher/driver last names with many fallbacks.
+ * Add ?debug=true to see which IDs were used for resolution.
  */
-
 router.get("/calendar", async (req, res) => {
   try {
-    const { start, end, status, driver_id, organization } = req.query;
+    const debug = String(req.query.debug || "false").toLowerCase() === "true";
 
-    // Convert dates safely
-    const startDate = start ? new Date(start) : new Date("2000-01-01");
-    const endDate = end ? new Date(end) : new Date("3000-01-01");
+    // --- Load collections ---
+    const [ridesSnap, clientsSnap, volunteersSnap] = await Promise.all([
+      db.collection("rides").get(),
+      db.collection("clients").get(),
+      db.collection("volunteers").get(),
+    ]);
 
-    // Query Firestore
-    let query = db.collection("rides")
-      .where("Date", ">=", startDate)
-      .where("Date", "<=", endDate);          // Firestore field **must be capital D** ✅
+    // --- Index clients by several possible keys ---
+    const clientsById = new Map();          // client document id -> last_name
+    const clientsByUID = new Map();         // clientUID field     -> last_name
+    clientsSnap.forEach(doc => {
+      const c = doc.data() || {};
+      const last = c.last_name ?? c.lastName ?? null;
+      clientsById.set(doc.id, last);
+      if (c.clientUID) clientsByUID.set(c.clientUID, last);
+      if (c.uid)       clientsByUID.set(c.uid, last);
+      if (c.client_id) clientsByUID.set(c.client_id, last);
+    });
 
-    if (status) query = query.where("status", "==", status);
-    if (driver_id) query = query.where("driverUID", "==", driver_id);
-    if (organization) query = query.where("organization", "==", organization);
+    // --- Index volunteers many ways (dispatcher/driver live here) ---
+    const volByVolunteerId = new Map();     // volunteer_id -> last_name
+    const volByDocId = new Map();           // doc.id       -> last_name
+    const volByEmail = new Map();           // email        -> last_name
+    const volByUserId = new Map();          // UserID / user_id -> last_name
+    volunteersSnap.forEach(doc => {
+      const v = doc.data() || {};
+      const last = v.last_name ?? v.lastName ?? null;
+      if (!last) return;
 
-    const snapshot = await query.get();
-    if (snapshot.empty) {
-      return res.json({ success: true, rides: [] });
-    }
+      if (v.volunteer_id) volByVolunteerId.set(String(v.volunteer_id), last);
+      volByDocId.set(doc.id, last);
+      if (v.email_address) volByEmail.set(String(v.email_address).toLowerCase(), last);
+      if (v.UserID)        volByUserId.set(String(v.UserID), last);
+      if (v.user_id)       volByUserId.set(String(v.user_id), last);
+    });
 
-    const rides = snapshot.docs.map(doc => {
-      const data = doc.data();
+    // --- Helpers ---
+    const fmtDate = ts =>
+      ts?.toDate?.().toLocaleDateString("en-US") ?? null;
 
-      return {
-        ride_id: data.ride_id || doc.id,
-        date: data.Date,                            // Calendar date ✅
-        pickupTime: data.pickupTime || null,
-        appointmentTime: data.appointmentTime || null,
-        status: data.status || "",
-        appointment_type: data.appointment_type || "",
-        clientUID: data.clientUID || "",
-        driverUID: data.driverUID || "",
-        destinationUID: data.destinationUID || "",
-        milesDriven: data.milesDriven || 0,
-        wheelchair: data.wheelchair || false
+    const fmtTime = ts =>
+      ts?.toDate?.().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true }) ?? null;
+
+    const resolveVolunteerLast = (idLike) => {
+      if (!idLike) return null;
+      const key = String(idLike);
+      return (
+        volByVolunteerId.get(key) ||
+        volByDocId.get(key) ||
+        volByUserId.get(key) ||
+        volByEmail.get(key.toLowerCase()) ||
+        null
+      );
+    };
+
+    const resolveClientLast = (clientRef) => {
+      if (!clientRef) return null;
+      const key = String(clientRef);
+      return (
+        clientsByUID.get(key) ||
+        clientsById.get(key) ||
+        null
+      );
+    };
+
+    // --- Build payload ---
+    const rides = ridesSnap.docs.map(doc => {
+      const r = doc.data() || {};
+
+      // tolerate mixed field names
+      const rideId = r.ride_id ?? doc.id;
+
+      const dateTs = r.Date || r.date || null;
+      const pickupTs = r.pickupTime || r.pickup_time || r.pickupTme || null;
+      const apptTs = r.appointmentTime || r.appointment_time || null;
+
+      const status = r.status ?? r.Status ?? null;
+      const apptType = r.appointment_type ?? r.appointmentType ?? r.purpose ?? null;
+      const miles = r.milesDriven ?? r.MilesDriven ?? 0;
+      const chair = r.wheelchair ?? false;
+
+      // IDs that might be present in different shapes
+      const clientRef =
+        r.clientUID ?? r.client_uid ?? r.client ?? r.clientId ?? r.client_id ?? null;
+
+      const dispatcherRef =
+        r.dispatcherUID ?? r.dispatcher_uid ?? r.dispatcher ??
+        r.dispatcherId ?? r.dispatcher_id ?? r.assignedTo ?? null;
+
+      const driverRef =
+        r.driverUID ?? r.driver_uid ?? r.driver ??
+        r.driverId ?? r.driver_id ?? r.driver_volunteer_ref ?? null;
+
+      const clientLastName = resolveClientLast(clientRef);
+      const dispatcherLastName = resolveVolunteerLast(dispatcherRef);
+      const driverLastName = resolveVolunteerLast(driverRef);
+
+      const item = {
+        ride_id: rideId,
+        date: fmtDate(dateTs),
+        pickupTime: fmtTime(pickupTs),
+        appointmentTime: fmtTime(apptTs),
+        status,
+        appointment_type: apptType,
+        milesDriven: miles,
+        wheelchair: chair,
+        clientLastName,
+        dispatcherLastName,
+        driverLastName,
       };
+
+      if (debug) {
+        item._debug_ids = {
+          clientRef,
+          dispatcherRef,
+          driverRef,
+        };
+      }
+      return item;
     });
 
-    res.json({
-      success: true,
-      rides,
-      count: rides.length
-    });
-
-  } catch (error) {
-    console.error("🔥 Error fetching calendar rides:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error loading calendar rides.",
-      error: error.message
-    });
+    res.json({ success: true, rides });
+  } catch (err) {
+    console.error("🔥 Error GET /api/rides/calendar:", err);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -381,5 +451,6 @@ router.get("/by-driver", async (req, res) => {
     });
   }
 });
+
 
 module.exports = router;
