@@ -10,6 +10,8 @@ const clientsRouter = require("./routes/clients");
 const { verifyAddress, getRoute } = require("./integrations/maps");
 const { sendNotification } = require("./services/notifications");
 const reportsRouter = require("./routes/reports");
+const { Parser } = require('json2csv');
+const PDFDocument = require('pdfkit');
 
 
 const app = express();
@@ -1014,6 +1016,191 @@ app.use('/api/clients', clientsRouter);
 // Reports
 // ================================
 app.use("/api/reports", reportsRouter);
+
+// ================================
+// Exports
+// ================================
+
+app.get('/api/exports/:collection', async (req, res) => {
+  try {
+    const { collection } = req.params;
+    const { format = 'csv', fields } = req.query;
+
+    // Validate collection name
+    const allowedCollections = ['clients', 'volunteers', 'rides', 'destination', 'mileage_logs', 'audit_logs', ];
+    if (!allowedCollections.includes(collection)) {
+      return res.status(400).json({ 
+        success: false, 
+        error: `Invalid collection. Allowed collections: ${allowedCollections.join(', ')}` 
+      });
+    }
+
+    // Enforce auth and derive organization from JWT only
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ success: false, error: 'Authorization token required' });
+    }
+
+    const token = authHeader.substring(7);
+    const verification = applicationLayer.verifyToken(token);
+    if (!verification.success) {
+      return res.status(401).json({ success: false, error: 'Invalid or expired token' });
+    }
+
+    const effectiveOrg = verification.user && verification.user.org;
+    if (!effectiveOrg) {
+      return res.status(400).json({ success: false, error: 'Organization information not found in token' });
+    }
+
+    // Fetch documents scoped to user's organization
+    let snapshot;
+    const collRef = db.collection(collection);
+    // Try common org field names in order of likelihood
+    snapshot = await collRef.where('organization', '==', effectiveOrg).get();
+    if (snapshot.empty) {
+      snapshot = await collRef.where('organization_id', '==', effectiveOrg).get();
+    }
+    if (snapshot.empty) {
+      snapshot = await collRef.where('organizationId', '==', effectiveOrg).get();
+    }
+    if (snapshot.empty && collection === 'organizations') {
+      // Organizations collection may use org_id or the doc id itself
+      snapshot = await collRef.where('org_id', '==', effectiveOrg).get();
+      if (snapshot.empty) {
+        const doc = await collRef.doc(effectiveOrg).get();
+        if (doc.exists) {
+          snapshot = { empty: false, docs: [doc], size: 1 };
+        }
+      }
+    }
+
+    if (snapshot.empty) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'No documents found in collection' 
+      });
+    }
+
+    // Extract data
+    let data = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+
+    // Filter fields if specified
+    if (fields) {
+      const fieldList = fields.split(',').map(f => f.trim());
+      data = data.map(item => {
+        const filtered = {};
+        fieldList.forEach(field => {
+          if (item.hasOwnProperty(field)) {
+            filtered[field] = item[field];
+          }
+        });
+        return filtered;
+      });
+    }
+
+    // Return in requested format
+    if (format === 'csv') {
+      try {
+        const parser = new Parser();
+        const csv = parser.parse(data);
+
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', `attachment; filename="${collection}_export.csv"`);
+        return res.send(csv);
+      } catch (err) {
+        return res.status(500).json({ 
+          success: false, 
+          error: 'Failed to convert to CSV: ' + err.message 
+        });
+      }
+    } else if (format === 'pdf') {
+      try {
+        // Create a new PDF document
+        const doc = new PDFDocument({ margin: 50 });
+
+        // Set response headers
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename="${collection}_export.pdf"`);
+
+        // Pipe the PDF to the response
+        doc.pipe(res);
+
+        // Add title
+        doc.fontSize(20).text(`${collection.charAt(0).toUpperCase() + collection.slice(1)} Export`, { align: 'center' });
+        doc.moveDown();
+        doc.fontSize(10).text(`Generated: ${new Date().toLocaleString()}`, { align: 'center' });
+        doc.text(`Total Records: ${data.length}`, { align: 'center' });
+        doc.moveDown(2);
+
+        // Get all unique keys from the data
+        const allKeys = new Set();
+        data.forEach(item => {
+          Object.keys(item).forEach(key => allKeys.add(key));
+        });
+        const keys = Array.from(allKeys);
+
+        // Add data in a table-like format
+        doc.fontSize(8);
+        data.forEach((item, index) => {
+          // Add page break if needed
+          if (doc.y > 700) {
+            doc.addPage();
+          }
+
+          doc.fontSize(10).font('Helvetica-Bold').text(`Record ${index + 1}:`, { underline: true });
+          doc.fontSize(8).font('Helvetica');
+          doc.moveDown(0.3);
+
+          keys.forEach(key => {
+            const value = item[key];
+            if (value !== undefined && value !== null) {
+              // Format value based on type
+              let displayValue = value;
+              if (typeof value === 'object') {
+                displayValue = JSON.stringify(value);
+              } else if (typeof value === 'boolean') {
+                displayValue = value ? 'Yes' : 'No';
+              }
+              
+              // Truncate long values
+              if (String(displayValue).length > 80) {
+                displayValue = String(displayValue).substring(0, 77) + '...';
+              }
+              
+              doc.text(`${key}: ${displayValue}`);
+            }
+          });
+          
+          doc.moveDown(1);
+        });
+        
+        // Finalize the PDF
+        doc.end();
+        
+      } catch (err) {
+        return res.status(500).json({ 
+          success: false, 
+          error: 'Failed to convert to PDF: ' + err.message 
+        });
+      }
+    } else {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Invalid format. Supported formats are csv and pdf.' 
+      });
+    }
+
+  } catch (error) {
+    console.error('Export error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
 
 // ================================
 // Root Endpoint
