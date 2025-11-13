@@ -1111,7 +1111,7 @@ app.use("/api/reports", reportsRouter);
 // ================================
 // Notification
 // ================================
-app.use("/api/notifications", require("./routes/notifications"));
+// app.use("/api/notifications", require("./routes/notifications"));
 
 
 // ================================
