@@ -556,6 +556,50 @@ function normalizeDateInput(dateInput) {
   return null;
 }
 
+function normalizeVolunteerUnavailabilityEntries(entries) {
+  if (!Array.isArray(entries)) {
+    return [];
+  }
+
+  return entries
+    .map(entry => {
+      if (!entry || typeof entry !== 'object') {
+        return null;
+      }
+
+      const effectiveFromDate = normalizeDateInput(
+        entry.effectiveFrom ?? entry.effective_from ?? entry.startDate
+      );
+      const effectiveToDate = normalizeDateInput(
+        entry.effectiveTo ?? entry.effective_to ?? entry.endDate
+      );
+
+      const createdAtDate = convertFirestoreTimestamp(
+        entry.createdAt ?? entry.created_at ?? entry.submittedAt ?? entry.submitted_at
+      );
+      const updatedAtDate = convertFirestoreTimestamp(
+        entry.updatedAt ?? entry.updated_at ?? entry.submittedAt ?? entry.submitted_at
+      );
+
+      const unavailabilityString =
+        (typeof entry.unavailabilityString === 'string' && entry.unavailabilityString.trim()) ||
+        (typeof entry.unavailability_string === 'string' && entry.unavailability_string.trim()) ||
+        '';
+
+      return {
+        id: entry.id ?? entry.entryId ?? entry.uid ?? null,
+        repeated: entry.repeated === true,
+        unavailabilityString,
+        effectiveFrom: effectiveFromDate ? formatDateISO(effectiveFromDate) : null,
+        effectiveTo: effectiveToDate ? formatDateISO(effectiveToDate) : null,
+        source: entry.source ?? null,
+        createdAt: createdAtDate ? createdAtDate.toISOString() : null,
+        updatedAt: updatedAtDate ? updatedAtDate.toISOString() : null
+      };
+    })
+    .filter(Boolean);
+}
+
 function buildVolunteerUnavailabilityIndex(volunteer) {
   const singles = [];
   const recurring = [];
@@ -1590,11 +1634,17 @@ async function getRolesForOrganization(orgId) {
       };
     }
 
+    const sanitizedRoles = result.roles.map(role =>
+      !role || typeof role !== 'object'
+        ? role
+        : (({ permission_set, permissionSet, ...rest }) => rest)(role)
+    );
+
     return {
       success: true,
       organizationId: sanitizedOrgId,
       total: result.roles.length,
-      roles: result.roles
+      roles: sanitizedRoles
     };
   } catch (error) {
     console.error('Error in getRolesForOrganization:', error);
@@ -2800,24 +2850,9 @@ async function addVolunteerUnavailability(volunteerId, payload) {
       };
     }
 
-    const normalizedUnavailability = Array.isArray(updateResult.unavailability)
-      ? updateResult.unavailability.map(entry => {
-          const effectiveFromDate = normalizeDateInput(entry.effectiveFrom ?? entry.effective_from);
-          const effectiveToDate = normalizeDateInput(entry.effectiveTo ?? entry.effective_to);
-
-          const createdAt = convertFirestoreTimestamp(entry.createdAt ?? entry.created_at);
-          const updatedAt = convertFirestoreTimestamp(entry.updatedAt ?? entry.updated_at ?? entry.submittedAt);
-
-          return {
-            repeated: entry.repeated === true,
-            unavailabilityString: entry.unavailabilityString || entry.unavailability_string || '',
-            effectiveFrom: effectiveFromDate ? formatDateISO(effectiveFromDate) : null,
-            effectiveTo: effectiveToDate ? formatDateISO(effectiveToDate) : null,
-            createdAt: createdAt ? createdAt.toISOString() : null,
-            updatedAt: updatedAt ? updatedAt.toISOString() : null
-          };
-        })
-      : [];
+    const normalizedUnavailability = normalizeVolunteerUnavailabilityEntries(
+      updateResult.unavailability
+    );
 
     return {
       success: true,
@@ -2826,6 +2861,68 @@ async function addVolunteerUnavailability(volunteerId, payload) {
     };
   } catch (error) {
     console.error('Error in addVolunteerUnavailability:', error);
+    return {
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    };
+  }
+}
+
+async function getVolunteerUnavailability(volunteerId) {
+  try {
+    if (!volunteerId) {
+      return {
+        success: false,
+        message: 'Volunteer ID is required'
+      };
+    }
+
+    const normalizedVolunteerId =
+      typeof volunteerId === 'string' ? volunteerId.trim() : `${volunteerId}`;
+
+    if (!normalizedVolunteerId) {
+      return {
+        success: false,
+        message: 'Volunteer ID is required'
+      };
+    }
+
+    const volunteerResult = await dataAccess.getVolunteerById(normalizedVolunteerId);
+    if (!volunteerResult.success || !volunteerResult.volunteer) {
+      return {
+        success: false,
+        message: 'Volunteer not found',
+        error: volunteerResult.error
+      };
+    }
+
+    const volunteer = volunteerResult.volunteer;
+
+    if (!isDriverRole(volunteer)) {
+      return {
+        success: false,
+        message: 'Volunteer is not registered as a driver'
+      };
+    }
+
+    const normalizedUnavailability = normalizeVolunteerUnavailabilityEntries(
+      volunteer.unavailability
+    );
+
+    const updatedAt = convertFirestoreTimestamp(
+      volunteer.unavailabilityUpdatedAt ?? volunteer.unavailability_updated_at
+    );
+
+    return {
+      success: true,
+      volunteerId: volunteer.id ?? normalizedVolunteerId,
+      total: normalizedUnavailability.length,
+      unavailability: normalizedUnavailability,
+      updatedAt: updatedAt ? updatedAt.toISOString() : null
+    };
+  } catch (error) {
+    console.error('Error in getVolunteerUnavailability:', error);
     return {
       success: false,
       message: 'Internal server error',
@@ -3150,8 +3247,9 @@ async function createOrganization(orgData, authToken) {
       }
     }
 
-    // Define required fields based on schema
-    const requiredFields = ['name', 'org_id'];
+  // Define required fields based on schema
+  // org_id will be generated from the Firestore document id, so require a short_name at minimum
+  const requiredFields = ['short_name'];
     const missingFields = requiredFields.filter(field => !orgData[field]);
     if (missingFields.length > 0) {
       return {
@@ -3168,7 +3266,7 @@ async function createOrganization(orgData, authToken) {
       'email',
       'short_name',
       'phone_number',
-      'lisence_number',
+      'license_number',
       'website',
       'creation_date',
       'address2',
@@ -3193,7 +3291,14 @@ async function createOrganization(orgData, authToken) {
       'sc_zip',
       'sys_admin_phone_number',
       'sys_admin_user_id',
-      'sys_admin_security_level'
+      'sys_admin_security_level',
+      'minimum_age_of_client',
+      'days_before_ride',
+      'hour_open',
+      'hour_close',
+      'type_of_volunteering',
+      'days_of_operation',
+      'type_of_mobility'
     ];
 
     // Filter to only include allowed fields
@@ -3322,7 +3427,7 @@ async function updateOrganization(orgId, updateData, authToken) {
       'email',
       'short_name',
       'phone_number',
-      'lisence_number',
+      'license_number',
       'website',
       'creation_date',
       'address2',
@@ -3347,7 +3452,14 @@ async function updateOrganization(orgId, updateData, authToken) {
       'sc_zip',
       'sys_admin_phone_number',
       'sys_admin_user_id',
-      'sys_admin_security_level'
+      'sys_admin_security_level',
+      'minimum_age_of_client',
+      'days_before_ride',
+      'hour_open',
+      'hour_close',
+      'type_of_volunteering',
+      'days_of_operation',
+      'type_of_mobility'
     ];
 
     // Filter to only include allowed fields
@@ -3474,6 +3586,7 @@ module.exports = {
   getPermissionSetByRoleName,
   matchDriversForRideByUID,
   addVolunteerUnavailability,
+  getVolunteerUnavailability,
   getRideAppointmentInfo,
   getAllRidesAppointmentInfo,
   getRideByUID,

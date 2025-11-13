@@ -646,6 +646,75 @@ if (body.rides.length > 0) {
 
 ---
 
+# Volunteer Unavailability
+
+## 1. Get Unavailability for Volunteer (GET)
+
+### Endpoint
+```
+GET /api/volunteers/:volunteerId/unavailability
+```
+
+### Example Request
+```bash
+curl --location --request GET "http://localhost:3000/api/volunteers/abc123/unavailability" \
+  --header "Authorization: Bearer {{token}}"
+```
+
+### Expected Response (Success - 200)
+```json
+{
+  "success": true,
+  "volunteerId": "abc123",
+  "total": 2,
+  "unavailability": [
+    {
+      "id": null,
+      "repeated": true,
+      "unavailabilityString": "M11;W11",
+      "effectiveFrom": null,
+      "effectiveTo": null,
+      "source": "api",
+      "createdAt": "2025-02-20T14:30:00.000Z",
+      "updatedAt": "2025-02-20T14:30:00.000Z"
+    },
+    {
+      "id": null,
+      "repeated": false,
+      "unavailabilityString": "2025-03-14,13:00-15:00",
+      "effectiveFrom": "2025-03-14",
+      "effectiveTo": "2025-03-14",
+      "source": "api",
+      "createdAt": "2025-02-20T14:30:00.000Z",
+      "updatedAt": "2025-02-20T14:30:00.000Z"
+    }
+  ],
+  "updatedAt": "2025-02-20T14:30:00.000Z"
+}
+```
+
+### Expected Response (Volunteer Not Found - 404)
+```json
+{
+  "success": false,
+  "message": "Volunteer not found"
+}
+```
+
+### Postman Tests
+```javascript
+pm.test("status is 200", () => pm.response.to.have.status(200));
+
+const body = pm.response.json();
+pm.test("success flag is true", () => pm.expect(body.success).to.be.true);
+pm.test("unavailability array returned", () => pm.expect(body.unavailability).to.be.an("array"));
+pm.test("normalized strings present", () => pm.expect(body.unavailability[0]).to.have.property("unavailabilityString"));
+```
+
+The response returns normalized entries only; if a volunteer has no unavailability recorded, `unavailability` is an empty array with `success: true`.
+
+---
+
 # Role & Permission Tests
 
 ## 1. Get Roles for Organization (GET)
@@ -672,14 +741,12 @@ curl --location --request GET "http://localhost:3000/api/organizations/ORG-001/r
       "id": "dispatcher",
       "title": "Dispatcher",
       "org": "ORG-001",
-      "permission_set": "dispatcher",
       "sourceCollection": "roles"
     },
     {
       "id": "driver",
       "title": "Driver",
       "org": "default",
-      "permission_set": "driver",
       "sourceCollection": "roles"
     }
   ]
@@ -696,7 +763,7 @@ pm.test("roles array returned", () => pm.expect(body.roles).to.be.an("array"));
 pm.test("defaults included", () => pm.expect(body.roles.some(r => r.org === "default")).to.be.true);
 ```
 
-If the organization has no custom roles, the API still returns default ones (if defined); otherwise `roles` can be empty with `success: true`.
+If the organization has no custom roles, the API still returns default ones (if defined); otherwise `roles` can be empty with `success: true`. The `permission_set` identifier is intentionally suppressed in this response—use the dedicated permission-set endpoint below when you need the full permission document.
 
 ## 2. Get Permission Set for Role (GET)
 

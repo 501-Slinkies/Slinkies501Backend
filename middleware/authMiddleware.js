@@ -32,7 +32,8 @@ function generateToken(user) {
     userId: user.id,
     email: user.email,
     role: user.role,
-    org: user.org || user.organization
+    // Normalize organization value in token to always contain org_id when available
+    org: user.org_id || user.org || user.organization || user.organization_id
   };
   
   return jwt.sign(payload, secret, { 
@@ -126,7 +127,9 @@ function authenticate(req, res, next) {
   }
   
   // Attach user information to request
+  // Normalize organization on the attached user object for downstream middleware
   req.user = verification.user;
+  req.user.org = req.user.org || req.user.org_id || req.user.organization_id || req.user.organization;
   next();
 }
 

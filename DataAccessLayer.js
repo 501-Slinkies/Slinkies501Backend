@@ -410,7 +410,8 @@ async function getVolunteersByOrganization(organizationId) {
   const db = getFirestore();
   try {
     const volunteersRef = db.collection("volunteers");
-    const snapshot = await volunteersRef.where("OrganizationID", "==", organizationId).get();
+    // Normalize to use `organization_id` as the FK across collections
+    const snapshot = await volunteersRef.where("organization_id", "==", organizationId).get();
     
     const volunteers = [];
     snapshot.forEach(doc => {
@@ -1074,14 +1075,17 @@ async function createOrganization(orgData) {
     // Create the organization document
     const orgRef = db.collection("organizations").doc();
     console.log("About to create document with ID:", orgRef.id);
-    
+
+    // Enforce canonical org_id to be the Firestore document id
+    orgData.org_id = orgRef.id;
+
     await orgRef.set(orgData);
     console.log("Organization document created successfully with ID:", orgRef.id);
 
     return { 
       success: true, 
       orgId: orgRef.id,
-      organizationId: orgData.org_id,
+      organizationId: orgRef.id,
       message: "Organization created successfully"
     };
   } catch (error) {
