@@ -521,6 +521,131 @@ These tests cover both populated and empty ride assignments. When using a volunt
 
 ---
 
+## 2. Get Rides by Driver and Organization (POST)
+
+### Endpoint
+```
+POST /api/rides/by-driver
+```
+
+### Request Body
+```json
+{
+  "orgId": "org123",
+  "driverId": "zvco96u8CWM2ryR1CyKvyJ17VHC3"
+}
+```
+
+### Headers
+```
+Content-Type: application/json
+```
+
+### Example Request
+```bash
+curl --location --request POST "http://localhost:3000/api/rides/by-driver" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "orgId": "org123",
+    "driverId": "zvco96u8CWM2ryR1CyKvyJ17VHC3"
+  }'
+```
+
+### Example Request (Postman)
+```
+POST http://localhost:3000/api/rides/by-driver
+Content-Type: application/json
+
+{
+  "orgId": "org123",
+  "driverId": "zvco96u8CWM2ryR1CyKvyJ17VHC3"
+}
+```
+
+### Expected Response (Success - 200)
+```json
+{
+  "success": true,
+  "rides": [
+    {
+      "id": "rideDocId1",
+      "driverUID": "zvco96u8CWM2ryR1CyKvyJ17VHC3,Ca0vqvSfcDREseZK0n0c",
+      "Date": "2025-09-15T10:00:00Z",
+      "pickupTime": "10:15 AM",
+      "appointmentTime": "11:00 AM",
+      "status": "assigned",
+      "organization": "org123"
+    },
+    {
+      "id": "rideDocId2",
+      "driverUID": "zvco96u8CWM2ryR1CyKvyJ17VHC3",
+      "Date": "2025-09-16T10:00:00Z",
+      "pickupTime": "9:00 AM",
+      "appointmentTime": "10:00 AM",
+      "status": "assigned",
+      "organization": "org123"
+    }
+  ],
+  "count": 2,
+  "orgId": "org123",
+  "driverId": "zvco96u8CWM2ryR1CyKvyJ17VHC3"
+}
+```
+
+### Expected Response (Success, No Rides - 200)
+```json
+{
+  "success": true,
+  "rides": [],
+  "count": 0,
+  "message": "No rides found for the specified organization",
+  "orgId": "org123",
+  "driverId": "zvco96u8CWM2ryR1CyKvyJ17VHC3"
+}
+```
+
+### Expected Response (Error - 400 Bad Request)
+```json
+{
+  "success": false,
+  "message": "orgId and driverId are required in the request body"
+}
+```
+
+### Postman Tests
+```javascript
+pm.test("status code is 200", () => pm.response.to.have.status(200));
+
+const body = pm.response.json();
+const requestBody = pm.request.body.toJSON();
+pm.test("query succeeded", () => pm.expect(body.success).to.be.true);
+pm.test("rides array exists", () => pm.expect(body.rides).to.be.an("array"));
+pm.test("count is a number", () => pm.expect(body.count).to.be.a("number"));
+pm.test("orgId matches request", () => pm.expect(body.orgId).to.eql(requestBody.orgId));
+pm.test("driverId matches request", () => pm.expect(body.driverId).to.eql(requestBody.driverId));
+
+// If rides are returned, verify structure
+if (body.rides.length > 0) {
+  pm.test("ride has id", () => pm.expect(body.rides[0]).to.have.property("id"));
+  pm.test("ride has driverUID field", () => pm.expect(body.rides[0]).to.have.property("driverUID"));
+  pm.test("driverUID contains driverId", () => {
+    const driverUID = body.rides[0].driverUID || "";
+    const driverIds = driverUID.split(",").map(id => id.trim());
+    pm.expect(driverIds).to.include(body.driverId);
+  });
+}
+```
+
+### Notes
+- This endpoint searches for rides where the `driverUID` field contains the provided `driverId` as part of a comma-separated list
+- The `driverUID` field can contain multiple driver IDs separated by commas (e.g., "driver1,driver2,driver3")
+- The endpoint will return all rides where the `driverId` appears anywhere in the comma-separated `driverUID` field
+- Both `orgId` and `driverId` are required in the request body
+- The endpoint does not require authentication
+- Uses POST method with JSON body for consistency with other endpoints
+
+---
+
 # Role & Permission Tests
 
 ## 1. Get Roles for Organization (GET)
