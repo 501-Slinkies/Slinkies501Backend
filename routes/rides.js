@@ -339,10 +339,10 @@ router.post("/set-driver", async (req, res) => {
 
 /**
  * ============================================================================
- * ✅ GET /api/rides/by-driver
+ * ✅ POST /api/rides/by-driver
  * Returns rides for a specific driver within an organization
  * 
- * Query params: {
+ * Body: {
  *   "orgId": "org123",
  *   "driverId": "zvco96u8CWM2ryR1CyKvyJ17VHC3"
  * }
@@ -352,15 +352,15 @@ router.post("/set-driver", async (req, res) => {
  * If the driverId matches any ID in that list, the ride is returned.
  * ============================================================================
  */
-router.get("/by-driver", async (req, res) => {
+router.post("/by-driver", async (req, res) => {
   try {
-    const { orgId, driverId } = req.query;
+    const { orgId, driverId } = req.body;
 
     // Validate required fields
     if (!orgId || !driverId) {
       return res.status(400).json({
         success: false,
-        message: "orgId and driverId are required as query parameters"
+        message: "orgId and driverId are required in the request body"
       });
     }
 
