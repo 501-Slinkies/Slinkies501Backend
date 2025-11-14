@@ -9,30 +9,16 @@ function normalizeVolunteerRoles(user) {
     return [];
   }
 
-  const roleSources = [
-    user.roles,
-    user.role,
-    user.role_name
-  ];
+  // Only use role array (singular)
+  if (!user.role || !Array.isArray(user.role)) {
+    return [];
+  }
 
   const normalized = [];
 
-  for (const source of roleSources) {
-    if (!source) {
-      continue;
-    }
-
-    if (Array.isArray(source)) {
-      for (const entry of source) {
-        if (typeof entry === 'string' && entry.trim()) {
-          normalized.push(entry.trim());
-        }
-      }
-      continue;
-    }
-
-    if (typeof source === 'string' && source.trim()) {
-      normalized.push(source.trim());
+  for (const entry of user.role) {
+    if (typeof entry === 'string' && entry.trim()) {
+      normalized.push(entry.trim());
     }
   }
 
@@ -2053,23 +2039,20 @@ function matchesClientVolunteerCriteria(client, volunteer) {
 }
 
 // Helper function to check if a volunteer has a driver role
-// Checks if any role in the volunteer's roles array contains "driver" (case-insensitive)
+// Checks if any role in the volunteer's role array contains "driver" (case-insensitive)
 // Supports variants like: "driver", "default_driver", "pen_driver", "fish_rush_driver", etc.
 function isDriverRole(volunteer) {
   if (!volunteer) {
     return false;
   }
 
-  const rawRoles = volunteer.roles ?? volunteer.role ?? volunteer.role_name ?? null;
-  if (!rawRoles) {
+  // Only use role array (singular)
+  if (!volunteer.role || !Array.isArray(volunteer.role)) {
     return false;
   }
-
-  // Handle both array and string formats
-  const roles = Array.isArray(rawRoles) ? rawRoles : [rawRoles];
   
   // Check if any role contains "driver" (case-insensitive)
-  return roles.some(role => {
+  return volunteer.role.some(role => {
     if (typeof role !== 'string') {
       return false;
     }
