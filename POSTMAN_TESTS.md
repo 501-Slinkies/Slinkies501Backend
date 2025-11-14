@@ -291,6 +291,292 @@ Authorization: Bearer YOUR_TOKEN (recommended)
 }
 ```
 
+## Prerequisites
+
+1. **Start your server** (if not already running):
+   ```bash
+   node server.js
+   ```
+   Server should be running on `http://localhost:3000`
+
+2. **Authentication Token** (optional for most endpoints):
+   - Get a token by logging in via `POST /api/login`
+   - Include in headers: `Authorization: Bearer YOUR_TOKEN`
+
+---
+
+## Table of Contents
+
+1. [Authentication](#authentication)
+2. [Roles](#roles)
+3. [Users](#users)
+4. [Organizations](#organizations)
+5. [Drivers](#drivers)
+6. [Rides](#rides)
+7. [Calendar](#calendar)
+8. [Maps](#maps)
+9. [Notifications](#notifications)
+10. [Clients](#clients)
+11. [Volunteers](#volunteers)
+12. [Reports](#reports)
+
+---
+
+## Authentication
+
+### 1. Login (POST)
+
+#### Endpoint
+```
+POST /api/login
+```
+
+#### Headers
+```
+Content-Type: application/json
+```
+
+#### Request Body
+```json
+{
+  "username": "user@example.com",
+  "password": "your-password"
+}
+```
+
+#### Expected Response (Success - 200)
+```json
+{
+  "success": true,
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "user": {
+    "email": "user@example.com",
+    "roles": ["admin"],
+    "userId": "firebase-doc-id",
+    "organizationId": "org-001",
+    "organization": {
+      "id": "org-doc-id",
+      "org_id": "org-001",
+      "name": "Organization Name"
+    }
+  }
+}
+```
+
+#### Expected Response (Error - 401)
+```json
+{
+  "success": false,
+  "message": "Invalid credentials"
+}
+```
+
+---
+
+## Roles
+
+### 1. Create Role with Permissions (POST)
+
+#### Endpoint
+```
+POST /api/roles
+```
+
+#### Headers
+```
+Content-Type: application/json
+Authorization: Bearer YOUR_TOKEN (required)
+```
+
+#### Request Body
+```json
+{
+  "name": "coordinator",
+  "title": "Ride Coordinator",
+  "permissions": {
+    "create_clients": true,
+    "read_clients": true,
+    "update_clients": true,
+    "delete_clients": false,
+    "create_org": false,
+    "read_org": true,
+    "update_org": false,
+    "delete_org": false,
+    "create_rides": true,
+    "read_rides": true,
+    "update_rides": true,
+    "delete_rides": false,
+    "create_users": false,
+    "read_users": true,
+    "update_users": false,
+    "delete_users": false,
+    "create_volunteers": false,
+    "read_volunteers": true,
+    "update_volunteers": false,
+    "delete_volunteers": false,
+    "read_logs": true
+  }
+}
+```
+
+#### Expected Response (Success - 201)
+```json
+{
+  "success": true,
+  "message": "Role and permissions created successfully",
+  "roleId": "coordinator",
+  "permissionId": "coordinator"
+}
+```
+
+### 2. Get Parent Role (GET)
+
+#### Endpoint
+```
+GET /api/roles/:roleName/parent
+```
+
+#### Example
+```
+GET /api/roles/coordinator/parent
+```
+
+#### Headers
+```
+Authorization: Bearer YOUR_TOKEN (optional)
+```
+
+#### Expected Response (Success - 200)
+```json
+{
+  "success": true,
+  "parentRole": {
+    "id": "admin",
+    "name": "admin",
+    "title": "Administrator"
+  }
+}
+```
+
+---
+
+## Users
+
+### 1. Create User Account (POST)
+
+#### Endpoint
+```
+POST /api/users
+```
+
+#### Headers
+```
+Content-Type: application/json
+Authorization: Bearer YOUR_TOKEN (optional - required for admin creation)
+```
+
+#### Request Body
+```json
+{
+  "first_name": "John",
+  "last_name": "Doe",
+  "email_address": "john@example.com",
+  "password": "SecurePass123!",
+  "phone_number": "555-1234",
+  "role": "driver",
+  "organization_ID": "org-001"
+}
+```
+
+#### Expected Response (Success - 201)
+```json
+{
+  "success": true,
+  "message": "User created successfully",
+  "data": {
+    "userId": "firestore-doc-id",
+    "userID": "USER-001"
+  }
+}
+```
+
+### 2. Update User Account (PUT)
+
+#### Endpoint
+```
+PUT /api/users/:userID
+```
+
+#### Example
+```
+PUT /api/users/USER-001
+```
+
+#### Headers
+```
+Content-Type: application/json
+Authorization: Bearer YOUR_TOKEN (optional)
+```
+
+#### Request Body
+```json
+{
+  "first_name": "Jane",
+  "phone_number": "555-5678"
+}
+```
+
+#### Expected Response (Success - 200)
+```json
+{
+  "success": true,
+  "message": "User updated successfully",
+  "data": {
+    "userId": "firestore-doc-id",
+    "userID": "USER-001",
+    "user": {
+      "first_name": "Jane",
+      "email_address": "john@example.com",
+      ...
+    }
+  }
+}
+```
+
+### 3. Delete User Account (DELETE)
+
+#### Endpoint
+```
+DELETE /api/users/:userID
+```
+
+#### Example
+```
+DELETE /api/users/USER-001
+```
+
+#### Headers
+```
+Authorization: Bearer YOUR_TOKEN (recommended)
+```
+
+#### Expected Response (Success - 200)
+```json
+{
+  "success": true,
+  "message": "User deleted successfully",
+  "data": {
+    "userId": "firestore-doc-id",
+    "userID": "USER-001",
+    "deletedUser": {
+      "first_name": "John",
+      "last_name": "Doe",
+      "email_address": "john@example.com"
+    }
+  }
+}
+```
+
 ---
 
 ## Organizations
