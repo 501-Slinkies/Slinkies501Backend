@@ -136,6 +136,38 @@ async function getParentRole(roleName) {
   }
 }
 
+async function getParentRoleView(roleName) {
+  try {
+    if (!roleName || typeof roleName !== 'string' || !roleName.trim()) {
+      return {
+        success: false,
+        message: 'Role name is required'
+      };
+    }
+
+    const result = await dataAccess.getParentRoleView(roleName.trim());
+
+    if (!result.success) {
+      return {
+        success: false,
+        message: result.error || 'Failed to fetch parent role view'
+      };
+    }
+
+    return {
+      success: true,
+      view: result.view
+    };
+  } catch (error) {
+    console.error('Error fetching parent role view:', error);
+    return {
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    };
+  }
+}
+
 // Middleware to verify JWT and extract user information
 function verifyToken(token) {
   try {
@@ -3578,6 +3610,7 @@ module.exports = {
   loginUser, 
   createRoleWithPermissions, 
   getParentRole,
+  getParentRoleView,
   verifyToken, 
   createRide,
   matchDriversForRide,
