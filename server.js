@@ -41,9 +41,17 @@ const corsOptions = {
     return callback(null, true);
   }
 };
-
+// --- CORS Configuration stays the same above this ---
 app.use(cors(corsOptions));
+
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Keep bodyParser for backwards compatibility:
 app.use(bodyParser.json()); 
+app.use(bodyParser.urlencoded({ extended: true }));
+
+
 
 app.use("/api/volunteers", volunteersRouter);
 // ================================
