@@ -929,6 +929,38 @@ app.get('/api/roles/:roleName/permission-set', async (req, res) => {
   }
 });
 
+// Get parent role's view field for a specific role name
+app.get('/api/roles/:roleName/parent/view', async (req, res) => {
+  try {
+    const { roleName } = req.params;
+
+    if (!roleName) {
+      return res.status(400).send({
+        success: false,
+        message: 'Role name is required'
+      });
+    }
+
+    const result = await applicationLayer.getParentRoleView(roleName);
+
+    if (result.success) {
+      return res.status(200).send(result);
+    }
+
+    const statusCode =
+      result.message && result.message.toLowerCase().includes('not found') ? 404 : 400;
+
+    return res.status(statusCode).send(result);
+  } catch (error) {
+    console.error('Error in GET /api/roles/:roleName/parent/view endpoint:', error);
+    return res.status(500).send({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+});
+
 // Get all rides for a specific driver
 app.get('/api/drivers/:driverID/rides', async (req, res) => {
   try {

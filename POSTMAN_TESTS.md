@@ -172,6 +172,60 @@ Authorization: Bearer YOUR_TOKEN (optional)
 }
 ```
 
+### 3. Get Parent Role View (GET)
+
+#### Endpoint
+```
+GET /api/roles/:roleName/parent/view
+```
+
+#### Example
+```
+GET /api/roles/bripen_dispatcher/parent/view
+```
+
+#### Headers
+```
+Authorization: Bearer YOUR_TOKEN (optional)
+```
+
+#### Expected Response (Success - 200)
+```json
+{
+  "success": true,
+  "view": "Dispatcher"
+}
+```
+
+#### Expected Response (Error - 404)
+```json
+{
+  "success": false,
+  "message": "Role not found"
+}
+```
+
+#### Expected Response (Error - 404 - Parent Role Not Found)
+```json
+{
+  "success": false,
+  "message": "Parent role not found for this role"
+}
+```
+
+#### Expected Response (Error - 404 - View Field Not Found)
+```json
+{
+  "success": false,
+  "message": "View field not found in parent role"
+}
+```
+
+**Notes:**
+- This endpoint takes a role name (e.g., `bripen_dispatcher`), finds its `parent_role` field (`default_dispatcher`), then returns the `view` field from the parent role document.
+- The role must have a `parent_role` field pointing to another role.
+- The parent role document must have a `view` field.
+
 ---
 
 ## Users
@@ -457,6 +511,60 @@ Authorization: Bearer YOUR_TOKEN (optional)
   }
 }
 ```
+
+### 3. Get Parent Role View (GET)
+
+#### Endpoint
+```
+GET /api/roles/:roleName/parent/view
+```
+
+#### Example
+```
+GET /api/roles/bripen_dispatcher/parent/view
+```
+
+#### Headers
+```
+Authorization: Bearer YOUR_TOKEN (optional)
+```
+
+#### Expected Response (Success - 200)
+```json
+{
+  "success": true,
+  "view": "Dispatcher"
+}
+```
+
+#### Expected Response (Error - 404)
+```json
+{
+  "success": false,
+  "message": "Role not found"
+}
+```
+
+#### Expected Response (Error - 404 - Parent Role Not Found)
+```json
+{
+  "success": false,
+  "message": "Parent role not found for this role"
+}
+```
+
+#### Expected Response (Error - 404 - View Field Not Found)
+```json
+{
+  "success": false,
+  "message": "View field not found in parent role"
+}
+```
+
+**Notes:**
+- This endpoint takes a role name (e.g., `bripen_dispatcher`), finds its `parent_role` field (`default_dispatcher`), then returns the `view` field from the parent role document.
+- The role must have a `parent_role` field pointing to another role.
+- The parent role document must have a `view` field.
 
 ---
 
@@ -1437,6 +1545,12 @@ Authorization: Bearer {{auth_token}}
 ### Match Drivers for Ride
 ```
 GET http://localhost:3000/api/rides/{{test_ride_id}}/match-drivers
+Authorization: Bearer {{auth_token}}
+```
+
+### Get Parent Role View
+```
+GET http://localhost:3000/api/roles/bripen_dispatcher/parent/view
 Authorization: Bearer {{auth_token}}
 ```
 

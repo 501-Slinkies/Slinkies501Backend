@@ -384,6 +384,98 @@ async function getRoleByName(roleName) {
   }
 }
 
+async function getParentRoleView(roleName) {
+  const db = getFirestore();
+  try {
+    if (!roleName || typeof roleName !== "string") {
+      return { success: false, error: "Role name is required" };
+    }
+
+    const normalizedRoleName = roleName.trim();
+    if (!normalizedRoleName) {
+      return { success: false, error: "Role name is required" };
+    }
+
+    // Find the role document - try multiple collections and methods
+    const roleCollections = ['roles', 'Roles', 'role', 'Role'];
+    let roleDoc = null;
+
+    // First, try by document ID
+    for (const collectionName of roleCollections) {
+      const doc = await db.collection(collectionName).doc(normalizedRoleName).get();
+      if (doc.exists) {
+        roleDoc = { id: doc.id, ...doc.data() };
+        break;
+      }
+    }
+
+    // If not found, try querying by name field
+    if (!roleDoc) {
+      for (const collectionName of roleCollections) {
+        const snapshot = await db.collection(collectionName)
+          .where("name", "==", normalizedRoleName)
+          .limit(1)
+          .get();
+        if (!snapshot.empty) {
+          const doc = snapshot.docs[0];
+          roleDoc = { id: doc.id, ...doc.data() };
+          break;
+        }
+      }
+    }
+
+    if (!roleDoc) {
+      return { success: false, error: "Role not found" };
+    }
+
+    // Get the parent role name
+    const parentRoleName = roleDoc.parent_role || roleDoc.parentRole || roleDoc.parentRoleName;
+    if (!parentRoleName) {
+      return { success: false, error: "Parent role not found for this role" };
+    }
+
+    // Find the parent role document
+    let parentRoleDoc = null;
+    for (const collectionName of roleCollections) {
+      const doc = await db.collection(collectionName).doc(parentRoleName).get();
+      if (doc.exists) {
+        parentRoleDoc = { id: doc.id, ...doc.data() };
+        break;
+      }
+    }
+
+    // If not found by ID, try querying by name field
+    if (!parentRoleDoc) {
+      for (const collectionName of roleCollections) {
+        const snapshot = await db.collection(collectionName)
+          .where("name", "==", parentRoleName)
+          .limit(1)
+          .get();
+        if (!snapshot.empty) {
+          const doc = snapshot.docs[0];
+          parentRoleDoc = { id: doc.id, ...doc.data() };
+          break;
+        }
+      }
+    }
+
+    if (!parentRoleDoc) {
+      return { success: false, error: "Parent role document not found" };
+    }
+
+    // Get the view field
+    const view = parentRoleDoc.view || null;
+    if (view === null) {
+      return { success: false, error: "View field not found in parent role" };
+    }
+
+    return { success: true, view: view };
+  } catch (error) {
+    console.error("Error fetching parent role view:", error);
+    return { success: false, error: error.message };
+  }
+}
+
 async function getAllVolunteers() {
   const db = getFirestore();
   try {
@@ -1333,6 +1425,7 @@ module.exports = {
   getRoleByName,
   getRolesByOrganization,
   getPermissionSetByRoleName,
+  getParentRoleView,
   getAllVolunteers, 
   getVolunteersByOrganization,
   getVolunteerById,
