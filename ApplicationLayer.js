@@ -2404,6 +2404,7 @@ async function matchDriversForRide(rideId) {
             accepts_service_animal: volunteer.accepts_service_animal || false,
             destination_limitations: volunteer.destination_limitations || '',
             allergens_in_car: volunteer.allergens_in_car || '',
+            town_preference: volunteer.town_preference || null,
             preferenceMatches
           });
         } else {
@@ -2679,6 +2680,7 @@ async function matchDriversForRideByUID(uid) {
             accepts_service_animal: volunteer.accepts_service_animal || false,
             destination_limitations: volunteer.destination_limitations || '',
             allergens_in_car: volunteer.allergens_in_car || '',
+            town_preference: volunteer.town_preference || null,
             preferenceMatches
           });
         } else {
