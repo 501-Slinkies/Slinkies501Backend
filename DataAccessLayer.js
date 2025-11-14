@@ -410,8 +410,7 @@ async function getVolunteersByOrganization(organizationId) {
   const db = getFirestore();
   try {
     const volunteersRef = db.collection("volunteers");
-    // Normalize to use `organization_id` as the FK across collections
-    const snapshot = await volunteersRef.where("organization_id", "==", organizationId).get();
+    const snapshot = await volunteersRef.where("organization", "==", organizationId).get();
     
     const volunteers = [];
     snapshot.forEach(doc => {
