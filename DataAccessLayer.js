@@ -713,13 +713,59 @@ async function getRidesByDriverIdentifiers(identifiers) {
   }
 }
 
+// Helper function to normalize roles to role array format (singular)
+function normalizeRolesToArray(userData) {
+  if (!userData) {
+    return userData;
+  }
+
+  // Create a copy to avoid mutating the original
+  const normalized = { ...userData };
+
+  // Convert roles (plural), role (string), or role_name to role array (singular)
+  if (normalized.role && typeof normalized.role === 'string') {
+    // Convert single role string to array
+    normalized.role = [normalized.role.trim()];
+  } else if (normalized.role_name && typeof normalized.role_name === 'string') {
+    // Convert role_name string to array
+    normalized.role = [normalized.role_name.trim()];
+    delete normalized.role_name;
+  } else if (normalized.roles) {
+    // Convert roles (plural) to role (singular) array
+    if (Array.isArray(normalized.roles)) {
+      // Clean up array - trim strings and filter out empty values
+      normalized.role = normalized.roles
+        .map(role => typeof role === 'string' ? role.trim() : String(role))
+        .filter(role => role.length > 0);
+    } else if (typeof normalized.roles === 'string') {
+      normalized.role = [normalized.roles.trim()];
+    } else {
+      normalized.role = [];
+    }
+    delete normalized.roles;
+  } else if (!normalized.role) {
+    // If no role field exists, set to empty array
+    normalized.role = [];
+  } else if (Array.isArray(normalized.role)) {
+    // Ensure role array is clean - trim strings and filter out empty values
+    normalized.role = normalized.role
+      .map(role => typeof role === 'string' ? role.trim() : String(role))
+      .filter(role => role.length > 0);
+  }
+
+  return normalized;
+}
+
 async function createUser(userData) {
   const db = getFirestore();
   try {
+    // Normalize roles to array format
+    const normalizedUserData = normalizeRolesToArray(userData);
+
     // Check if user with same email already exists
-    if (userData.email_address) {
+    if (normalizedUserData.email_address) {
       const existingUserQuery = await db.collection("volunteers")
-        .where("email_address", "==", userData.email_address)
+        .where("email_address", "==", normalizedUserData.email_address)
         .get();
       
       if (!existingUserQuery.empty) {
@@ -728,9 +774,9 @@ async function createUser(userData) {
     }
 
     // Check if user_ID already exists
-    if (userData.user_ID) {
+    if (normalizedUserData.user_ID) {
       const existingUserIdQuery = await db.collection("volunteers")
-        .where("user_ID", "==", userData.user_ID)
+        .where("user_ID", "==", normalizedUserData.user_ID)
         .get();
       
       if (!existingUserIdQuery.empty) {
@@ -740,7 +786,7 @@ async function createUser(userData) {
 
     // Create the user document
     const userRef = db.collection("volunteers").doc();
-    await userRef.set(userData);
+    await userRef.set(normalizedUserData);
 
     return { 
       success: true, 
@@ -827,10 +873,13 @@ async function updateUser(userId, updateData) {
 
     const currentData = userDoc.data();
 
+    // Normalize roles to array format if roles are being updated
+    const normalizedUpdateData = normalizeRolesToArray(updateData);
+
     // If email is being changed, check it's not already taken by another user
-    if (updateData.email_address && updateData.email_address !== currentData.email_address) {
+    if (normalizedUpdateData.email_address && normalizedUpdateData.email_address !== currentData.email_address) {
       const existingUserQuery = await db.collection("volunteers")
-        .where("email_address", "==", updateData.email_address)
+        .where("email_address", "==", normalizedUpdateData.email_address)
         .get();
       
       if (!existingUserQuery.empty) {
@@ -843,9 +892,9 @@ async function updateUser(userId, updateData) {
     }
 
     // If user_ID is being changed, check it's not already taken
-    if (updateData.user_ID && updateData.user_ID !== currentData.user_ID) {
+    if (normalizedUpdateData.user_ID && normalizedUpdateData.user_ID !== currentData.user_ID) {
       const existingUserIdQuery = await db.collection("volunteers")
-        .where("user_ID", "==", updateData.user_ID)
+        .where("user_ID", "==", normalizedUpdateData.user_ID)
         .get();
       
       if (!existingUserIdQuery.empty) {
@@ -858,10 +907,10 @@ async function updateUser(userId, updateData) {
     }
 
     // Always update the updated_at timestamp
-    updateData.updated_at = new Date();
+    normalizedUpdateData.updated_at = new Date();
 
     // Update the user document
-    await db.collection("volunteers").doc(userId).update(updateData);
+    await db.collection("volunteers").doc(userId).update(normalizedUpdateData);
 
     return { 
       success: true, 
