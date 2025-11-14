@@ -190,7 +190,7 @@ async function getVolunteersByOrganization(organizationId) {
   const db = getFirestore();
   try {
     const volunteersRef = db.collection("volunteers");
-    const snapshot = await volunteersRef.where("OrganizationID", "==", organizationId).get();
+    const snapshot = await volunteersRef.where("organization", "==", organizationId).get();
     
     const volunteers = [];
     snapshot.forEach(doc => {
