@@ -2,39 +2,22 @@
 const express = require("express");
 const router = express.Router();
 const { db } = require("../firebase");
+const _ = require("lodash");
 
-/* ============================================================================
-   HELPER: Detect Which Collection a Document ID Belongs To
-   ============================================================================ */
-async function detectCollectionById(docId) {
-  const collections = ["clients", "rides", "volunteers"];
-
-  for (const col of collections) {
-    const snap = await db.collection(col).doc(docId).get();
-    if (snap.exists) {
-      return { collection: col, data: snap.data() };
-    }
-  }
-
-  return null;
-}
-
-/* ============================================================================
-   POST /api/reports/save
-   Saves filters for ANY Firestore document ID
-   ============================================================================ */
+/**
+ * POST /api/reports/save
+ */
 router.post("/save", async (req, res) => {
   try {
     let { user_id, selectedParams } = req.body;
 
-    if (!user_id) {
+    if (!user_id || !selectedParams || selectedParams.length === 0) {
       return res.status(400).json({
         success: false,
-        message: "Missing user_id (can be client_id, ride_id, or volunteer_id)",
+        message: "Missing or invalid user_id or selectedParams",
       });
     }
 
-    // Parse selectedParams safely
     if (typeof selectedParams === "string") {
       try {
         selectedParams = JSON.parse(selectedParams);
@@ -42,18 +25,10 @@ router.post("/save", async (req, res) => {
         selectedParams = selectedParams
           .replace(/[\[\]]/g, "")
           .split(",")
-          .map(f => f.trim());
+          .map((f) => f.trim());
       }
     }
 
-    if (!Array.isArray(selectedParams) || selectedParams.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "selectedParams must be a non-empty array",
-      });
-    }
-
-    // Save filter settings for this resource ID
     await db.collection("savedReports").add({
       user_id,
       selectedParams,
@@ -63,37 +38,24 @@ router.post("/save", async (req, res) => {
     res.json({
       success: true,
       message: "Report settings saved successfully",
-      target_document_id: user_id,
-      saved_params: selectedParams,
+      user_id,
     });
-
   } catch (error) {
-    console.error("❌ POST /save error:", error);
     res.status(500).json({
       success: false,
-      message: "Server error in /save",
+      message: "Server error",
       error: error.message,
     });
   }
 });
 
-
-/* ============================================================================
-   GET /api/reports/:user_id
-   Loads saved filters → detects which collection the ID belongs to
-   ============================================================================ */
+/**
+ * GET /api/reports/:user_id
+ */
 router.get("/:user_id", async (req, res) => {
   try {
     const { user_id } = req.params;
 
-    if (!user_id) {
-      return res.status(400).json({
-        success: false,
-        message: "Missing user_id",
-      });
-    }
-
-    // Load latest saved filter settings
     const snapshot = await db
       .collection("savedReports")
       .where("user_id", "==", user_id)
@@ -104,110 +66,114 @@ router.get("/:user_id", async (req, res) => {
     if (snapshot.empty) {
       return res.json({
         success: true,
-        message: "No saved report settings found",
         reports: {},
+        message: "No saved report filters found",
       });
     }
 
     let selectedParams = snapshot.docs[0].data().selectedParams;
 
-    // Ensure params array
     if (typeof selectedParams === "string") {
       try {
         selectedParams = JSON.parse(selectedParams);
       } catch {
-        selectedParams = selectedParams
-          .replace(/[\[\]]/g, "")
-          .split(",")
-          .map(f => f.trim());
+        selectedParams = selectedParams.replace(/[\[\]]/g, "").split(",");
       }
     }
 
-    /* -----------------------------------------------------------
-       Detect WHICH collection this ID belongs to
-       ----------------------------------------------------------- */
-    const detected = await detectCollectionById(user_id);
-
-    if (!detected) {
-      return res.status(404).json({
-        success: false,
-        message: `Document ID ${user_id} not found in clients, rides, or volunteers.`,
-      });
-    }
-
-    const { collection, data } = detected;
-
-    /* -----------------------------------------------------------
-       Build filtered result
-       ----------------------------------------------------------- */
-    const filtered = {};
-    selectedParams.forEach(p => {
-      if (data[p] !== undefined) {
-        filtered[p] = data[p];
-      }
-    });
-
-    // Always include ID
-    filtered.id = user_id;
+    const reports = await getReportData(user_id, selectedParams);
 
     res.json({
       success: true,
-      document_type: collection,
       filters_used: selectedParams,
-      reports: filtered,
+      reports,
     });
-
   } catch (error) {
-    console.error("❌ GET /:user_id error:", error);
     res.status(500).json({
       success: false,
-      message: "Server error in /:user_id",
+      message: "Server error generating report",
       error: error.message,
     });
   }
 });
 
+// =============================================================
+// REPORT LOGIC
+// =============================================================
 
-/* ============================================================================
-   GET /api/reports/all   (unchanged — returns all data)
-   ============================================================================ */
-router.get("/all", async (req, res) => {
-  try {
-    const clientsSnap = await db.collection("clients").get();
-    const ridesSnap = await db.collection("rides").get();
-    const volunteersSnap = await db.collection("volunteers").get();
+async function getReportData(user_id, fields) {
+  let results = {};
 
-    const clients = clientsSnap.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
-
-    const rides = ridesSnap.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
-
-    const volunteers = volunteersSnap.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
-
-    res.json({
-      success: true,
-      clients,
-      rides,
-      volunteers,
-    });
-
-  } catch (error) {
-    console.error("❌ /all error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error in /all",
-      error: error.message,
-    });
+  // CLIENT REPORTS
+  if (fields.includes("first_name") || fields.includes("last_name")) {
+    results.client = await getClientData(user_id);
   }
-});
 
+  // RIDES REPORTS
+  if (
+    fields.includes("ride_status") ||
+    fields.includes("trip_mileage") ||
+    fields.includes("driver_id")
+  ) {
+    results.rides = await getRideData(user_id);
+  }
+
+  // VOLUNTEER REPORTS
+  if (
+    fields.includes("volunteering_status") ||
+    fields.includes("mobility_assistance")
+  ) {
+    results.volunteer = await getVolunteerData(user_id);
+  }
+
+  return results;
+}
+
+/**
+ * CLIENT DATA (first_name + last_name)
+ */
+async function getClientData(clientId) {
+  const ref = db.collection("clients").doc(clientId);
+  const doc = await ref.get();
+
+  if (!doc.exists) return {};
+
+  return {
+    id: clientId,
+    first_name: doc.data().first_name || "",
+    last_name: doc.data().last_name || "",
+  };
+}
+
+/**
+ * RIDE DATA for this client
+ */
+async function getRideData(clientId) {
+  let query = db.collection("rides").where("client_id", "==", clientId);
+  const snapshot = await query.get();
+
+  return snapshot.docs.map((doc) => ({
+    id: doc.id,
+    ride_status: doc.data().status || doc.data().ride_status || "",
+    trip_mileage:
+      doc.data().MilesDriven || doc.data().miles_driven || "",
+    driver_id:
+      doc.data().Driver || doc.data().driver_volunteer_ref || "",
+  }));
+}
+
+/**
+ * VOLUNTEER DATA linked to this client (if any)
+ */
+async function getVolunteerData(clientId) {
+  let query = db.collection("volunteers").where("client_id", "==", clientId);
+  const snapshot = await query.get();
+
+  return snapshot.docs.map((doc) => ({
+    id: doc.id,
+    volunteering_status: doc.data().volunteering_status || "",
+    mobility_assistance: doc.data().mobility_assistance || "",
+  }));
+}
 
 module.exports = router;
