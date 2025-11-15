@@ -52,50 +52,63 @@ router.post("/save", async (req, res) => {
 /**
  * GET /api/reports/:user_id
  */
-router.get("/:user_id", async (req, res) => {
+app.get('/api/reports/:user_id', async (req, res) => {
   try {
     const { user_id } = req.params;
 
-    const snapshot = await db
-      .collection("savedReports")
-      .where("user_id", "==", user_id)
-      .orderBy("timestamp", "desc")
+    const savedDoc = await db.collection('savedReports')
+      .where('user_id', '==', user_id)
+      .orderBy('timestamp', 'desc')
       .limit(1)
       .get();
 
-    if (snapshot.empty) {
+    if (savedDoc.empty) {
       return res.json({
         success: true,
+        document_type: null,
+        filters_used: [],
         reports: {},
-        message: "No saved report filters found",
+        message: "No saved report filters found"
       });
     }
 
-    let selectedParams = snapshot.docs[0].data().selectedParams;
+    const data = savedDoc.docs[0].data();
+    const filters = data.selectedParams || [];
 
-    if (typeof selectedParams === "string") {
-      try {
-        selectedParams = JSON.parse(selectedParams);
-      } catch {
-        selectedParams = selectedParams.replace(/[\[\]]/g, "").split(",");
+    // Detect document collection
+    const collections = ["clients", "rides", "volunteers"];
+    let documentType = null;
+    let finalData = null;
+
+    for (const col of collections) {
+      const docRef = await db.collection(col).doc(user_id).get();
+      if (docRef.exists) {
+        documentType = col;
+        const raw = docRef.data();
+        finalData = {};
+
+        // Only return fields that user selected
+        for (const f of filters) {
+          finalData[f] = raw[f];
+        }
+
+        break;
       }
     }
 
-    const reports = await getReportData(user_id, selectedParams);
-
-    res.json({
+    return res.json({
       success: true,
-      filters_used: selectedParams,
-      reports,
+      document_type: documentType,   // <--- Add this line
+      filters_used: filters,
+      reports: finalData || {}
     });
+
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Server error generating report",
-      error: error.message,
-    });
+    console.error(error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
+
 
 // =============================================================
 // REPORT LOGIC
