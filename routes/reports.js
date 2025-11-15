@@ -6,22 +6,29 @@ const admin = require("firebase-admin");
 const db = admin.firestore();
 
 /**
+ * -------------------------------------------------
  * POST /api/reports/save
+ * Save report configuration:
+ *  - user_id (who saved the report)
+ *  - selectedParams (fields they want in the report)
+ *  - collection ("clients" | "rides" | "volunteers")
+ * -------------------------------------------------
  */
 router.post("/save", async (req, res) => {
   try {
-    const { user_id, selectedParams } = req.body;
+    const { user_id, selectedParams, collection } = req.body;
 
-    if (!user_id || !selectedParams) {
+    if (!user_id || !selectedParams || !collection) {
       return res.status(400).json({
         success: false,
-        message: "Missing user_id or selectedParams",
+        message: "Missing user_id, selectedParams, or collection",
       });
     }
 
     const docRef = await db.collection("savedReports").add({
       user_id,
       selectedParams,
+      collection,
       timestamp: new Date(),
     });
 
@@ -40,16 +47,20 @@ router.post("/save", async (req, res) => {
 });
 
 /**
- * GET /api/reports/:user_id
+ * -------------------------------------------------
+ * GET /api/reports
+ * Returns a FULL REPORT based on last saved config:
+ *  - loads latest saved report settings
+ *  - reads selected collection
+ *  - returns ALL documents with just selected fields
+ * -------------------------------------------------
  */
-router.get("/:user_id", async (req, res) => {
+router.get("/", async (req, res) => {
   try {
-    const user_id = req.params.user_id;
-
-    // Get saved filters
+    // 1️⃣ Load most recent saved report config
     const savedSnapshot = await db
       .collection("savedReports")
-      .where("user_id", "==", user_id)
+      .orderBy("timestamp", "desc")
       .limit(1)
       .get();
 
@@ -57,54 +68,45 @@ router.get("/:user_id", async (req, res) => {
       return res.status(200).json({
         success: true,
         filters_used: [],
-        reports: {},
-        message: "No saved report filters found",
+        report_data: [],
+        message: "No saved report configuration found",
       });
     }
 
     const savedData = savedSnapshot.docs[0].data();
-    const filters = savedData.selectedParams;
 
-    // Check collections
-    const collections = ["clients", "rides", "volunteers"];
-    let foundCollection = null;
-    let docData = null;
+    const filters = savedData.selectedParams; // fields user selected
+    const collection = savedData.collection;  // collection to pull from
 
-    for (const col of collections) {
-      const docSnap = await db.collection(col).doc(user_id).get();
-      if (docSnap.exists) {
-        foundCollection = col;
-        docData = docSnap.data();
-        break;
-      }
-    }
+    // 2️⃣ Get all docs from selected collection
+    const docsSnapshot = await db.collection(collection).get();
 
-    if (!foundCollection) {
-      return res.status(200).json({
-        success: true,
-        filters_used: filters,
-        reports: {},
-        message: "No matching doc found",
+    let results = [];
+
+    // 3️⃣ Extract only selected fields from each document
+    docsSnapshot.forEach((doc) => {
+      const raw = doc.data();
+
+      let filtered = {};
+      filters.forEach((field) => {
+        if (raw[field] !== undefined) {
+          filtered[field] = raw[field];
+        }
       });
-    }
 
-    // Return only selected fields
-    let reportData = {};
-    filters.forEach((field) => {
-      if (docData[field] !== undefined) {
-        reportData[field] = docData[field];
-      }
+      results.push(filtered);
     });
 
+    // 4️⃣ Return final report
     return res.status(200).json({
       success: true,
-      document_type: foundCollection,
       filters_used: filters,
-      reports: reportData,
+      collection_used: collection,
+      report_data: results,
     });
 
   } catch (err) {
-    console.error("Error fetching report:", err);
+    console.error("Error generating report:", err);
     return res.status(500).json({
       success: false,
       message: "Internal server error",
