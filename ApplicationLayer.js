@@ -169,65 +169,100 @@ function verifyToken(token) {
 
 async function createRoleWithPermissions(roleData, authToken) {
   try {
-    // Verify the JWT token and extract user information
-    const tokenVerification = verifyToken(authToken);
-    if (!tokenVerification.success) {
-      return { success: false, message: 'Authentication failed' };
+    // Token checking disabled for now - skip authentication
+    // if (authToken) {
+    //   const tokenVerification = verifyToken(authToken);
+    //   if (!tokenVerification.success) {
+    //     return { success: false, message: 'Authentication failed' };
+    //   }
+    // }
+
+    // Validate required fields - org_id comes from request body
+    if (!roleData.name || !roleData.org_id) {
+      return { success: false, message: 'Role name and org_id are required' };
     }
 
-    // Extract organization from JWT
-    const userInfo = tokenVerification.user;
-    if (!userInfo.org) {
-      return { success: false, message: 'Organization information not found in session' };
-    }
-
-    // Validate required fields
-    if (!roleData.name || !roleData.title) {
-      return { success: false, message: 'Role name and title are required' };
-    }
-
-    // Prepare role data with organization from JWT
+    // Prepare role data with only name, org_id, and parentRole
     const roleDataWithOrg = {
       name: roleData.name,
-      title: roleData.title,
-      org: userInfo.org
+      org_id: roleData.org_id
     };
 
-    // Prepare permission data
-    const permissionData = {
-      name: roleData.name,
-      ...roleData.permissions // All the CRUD boolean fields
-    };
+    // Add parentRole only if provided
+    if (roleData.parentRole) {
+      roleDataWithOrg.parentRole = roleData.parentRole;
+    }
 
-    // Create both role and permission documents
-    const [roleResult, permissionResult] = await Promise.all([
-      dataAccess.createRole(roleDataWithOrg),
-      dataAccess.createPermission(permissionData)
-    ]);
+    // Create role document only (no permissions)
+    const roleResult = await dataAccess.createRole(roleDataWithOrg);
 
-    if (roleResult.success && permissionResult.success) {
+    if (roleResult.success) {
       return {
         success: true,
-        message: 'Role and permissions created successfully',
+        message: 'Role created successfully',
         data: {
           roleId: roleResult.roleId,
-          permissionId: permissionResult.permissionId
+          collection: roleResult.collection
         }
       };
     } else {
-      // If either creation failed, return the error
-      const errors = [];
-      if (!roleResult.success) errors.push(`Role creation failed: ${roleResult.error}`);
-      if (!permissionResult.success) errors.push(`Permission creation failed: ${permissionResult.error}`);
-      
       return {
         success: false,
-        message: 'Failed to create role and/or permissions',
-        errors: errors
+        message: 'Failed to create role',
+        error: roleResult.error
       };
     }
   } catch (error) {
     console.error('Error in createRoleWithPermissions:', error);
+    return {
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    };
+  }
+}
+
+async function createPermissionForRole(roleName, permissionData, authToken) {
+  try {
+    // Token checking disabled for now - skip authentication
+    // if (authToken) {
+    //   const tokenVerification = verifyToken(authToken);
+    //   if (!tokenVerification.success) {
+    //     return { success: false, message: 'Authentication failed' };
+    //   }
+    // }
+
+    // Validate required fields
+    if (!roleName || typeof roleName !== 'string' || roleName.trim() === '') {
+      return { success: false, message: 'Role name is required' };
+    }
+
+    if (!permissionData || typeof permissionData !== 'object') {
+      return { success: false, message: 'Permission data is required' };
+    }
+
+    // Create permission document and update role with reference
+    const result = await dataAccess.createPermissionAndUpdateRole(roleName, permissionData);
+
+    if (result.success) {
+      return {
+        success: true,
+        message: 'Permission created and role updated successfully',
+        data: {
+          permissionId: result.permissionId,
+          roleName: result.roleName,
+          roleCollection: result.roleCollection
+        }
+      };
+    } else {
+      return {
+        success: false,
+        message: 'Failed to create permission and update role',
+        error: result.error
+      };
+    }
+  } catch (error) {
+    console.error('Error in createPermissionForRole:', error);
     return {
       success: false,
       message: 'Internal server error',
@@ -3820,7 +3855,8 @@ async function resetUserPassword(userID, newPassword, authToken) {
 
 module.exports = { 
   loginUser, 
-  createRoleWithPermissions, 
+  createRoleWithPermissions,
+  createPermissionForRole, 
   getParentRole,
   getParentRoleView,
   verifyToken, 
