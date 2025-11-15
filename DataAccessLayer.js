@@ -873,6 +873,11 @@ async function updateUser(userId, updateData) {
 
     const currentData = userDoc.data();
 
+    // Prevent password updates through this function - passwords must be reset via resetPassword function
+    if (updateData.password !== undefined) {
+      return { success: false, error: "Password cannot be updated through this endpoint. Use the password reset endpoint instead." };
+    }
+
     // Normalize roles to array format if roles are being updated
     const normalizedUpdateData = normalizeRolesToArray(updateData);
 
@@ -919,6 +924,84 @@ async function updateUser(userId, updateData) {
     };
   } catch (error) {
     console.error("Error updating user:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+async function resetPassword(userId, newPassword) {
+  const db = getFirestore();
+  const { hashPassword } = require("./utils/encryption");
+  
+  try {
+    // Check if user exists
+    const userDoc = await db.collection("volunteers").doc(userId).get();
+    if (!userDoc.exists) {
+      return { success: false, error: "User not found" };
+    }
+
+    if (!newPassword || typeof newPassword !== 'string' || newPassword.trim().length === 0) {
+      return { success: false, error: "New password is required and must be a non-empty string" };
+    }
+
+    // Hash the new password
+    const hashedPassword = hashPassword(newPassword.trim());
+
+    // Update the user's password
+    await db.collection("volunteers").doc(userId).update({
+      password: hashedPassword,
+      updated_at: new Date()
+    });
+
+    return { 
+      success: true, 
+      userId: userId,
+      message: "Password reset successfully"
+    };
+  } catch (error) {
+    console.error("Error resetting password:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+async function resetPasswordByUserID(userID, newPassword) {
+  const db = getFirestore();
+  const { hashPassword } = require("./utils/encryption");
+  
+  try {
+    // Find user by user_ID
+    const snapshot = await db.collection("volunteers")
+      .where("uid", "==", userID)
+      .limit(1)
+      .get();
+
+    if (snapshot.empty) {
+      return { success: false, error: "User not found" };
+    }
+
+    if (!newPassword || typeof newPassword !== 'string' || newPassword.trim().length === 0) {
+      return { success: false, error: "New password is required and must be a non-empty string" };
+    }
+
+    const userDoc = snapshot.docs[0];
+    const userId = userDoc.id;
+
+    // Hash the new password
+    const hashedPassword = hashPassword(newPassword.trim());
+
+    // Update the user's password
+    await db.collection("volunteers").doc(userId).update({
+      password: hashedPassword,
+      updated_at: new Date()
+    });
+
+    return { 
+      success: true, 
+      userId: userId,
+      userID: userID,
+      message: "Password reset successfully"
+    };
+  } catch (error) {
+    console.error("Error resetting password:", error);
     return { success: false, error: error.message };
   }
 }
@@ -1493,6 +1576,8 @@ module.exports = {
   getUserById,
   getUserByUserID,
   updateUser,
+  resetPassword,
+  resetPasswordByUserID,
   deleteUser,
   fetchRidesInRange,
   createOrganization,
