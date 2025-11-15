@@ -107,7 +107,7 @@ async function createAddress(addressData) {
 
     const newAddress = {
         destination_id: "",
-        organization: addressData.organization_id || addressData.organization || "",
+        organization: addressData.organization,
         nickname: addressData.nickname || "",
         street_address,
         address_2: addressData.address_2 || "",
@@ -170,7 +170,7 @@ function loadCSV(filePath) {
 
 // --- Migration Functions ---
 
-async function migrateClients(filePath) {
+async function migrateClients(filePath , organization) {
     const rows = await loadCSV(filePath);
     let limit = migrateClients.limit ?? rows.length;
     let count = 0;
@@ -189,7 +189,7 @@ async function migrateClients(filePath) {
 
         const clientData = {
             client_id: '',
-            organization: row[findKey(row, 'ORGANIZATION')]?.trim() || '',
+            organization: organization,
             street_address: row[findKey(row, "STREET ADDRESS")]?.trim() || '',
             address2: row[findKey(row, "ADDRESS 2")]?.trim() || '',
             first_name: firstName,
@@ -258,7 +258,7 @@ async function migrateClients(filePath) {
     console.log(`Client migration finished. Processed ${count} rows. Lookup map size: ${clientLookup.size}`);
 }
 
-async function migrateVolunteers(filePath) {
+async function migrateVolunteers(filePath, organization) {
     const rows = await loadCSV(filePath);
     let limit = migrateVolunteers.limit ?? rows.length;
     let count = 0;
@@ -277,7 +277,7 @@ async function migrateVolunteers(filePath) {
 
         const volunteerData = {
             uid: '', // Will be set below
-            organization: row[findKey(row, 'ORGANIZATION')]?.trim() || '',
+            organization: organization,
             first_name: firstName,
             last_name: lastName,
             password: row[findKey(row, "PASSWORD")]?.trim() || 'defaultPassword',
@@ -354,7 +354,7 @@ async function migrateVolunteers(filePath) {
     console.log(`Volunteer migration finished. Processed ${count} rows. Lookup map size: ${volunteerLookup.size}`);
 }
 
-async function migrateCallData(filePath) {
+async function migrateCallData(filePath, organization) {
     const rows = await loadCSV(filePath);
     let limit = migrateCallData.limit ?? rows.length;
     let count = 0;
@@ -378,6 +378,7 @@ async function migrateCallData(filePath) {
                 zip: row[findKey(row, 'ZIP')] || "",
                 town: row[findKey(row, 'TOWN')] || row[findKey(row, 'CITY')] || "",
                 entered_by: "System", // Matches schema
+                organization: organization,
             };
 
             if (!addressData.street_address || !addressData.city) {
@@ -515,19 +516,27 @@ async function migrateCallData(filePath) {
 
 // --- Main Execution ---
 (async () => {
+    // --- SET YOUR ORGANIZATION HERE ---
+    const ORGANIZATION_TO_MIGRATE = "BriPen";
+
+    if (!ORGANIZATION_TO_MIGRATE) {
+        console.error("Error: ORGANIZATION_TO_MIGRATE variable is not set. Halting script.");
+        return;
+    }
+
     // Set optional limits for testing, or comment out to process all rows.
     //migrateClients.limit = 5;
     //migrateVolunteers.limit = 5;
     //migrateCallData.limit = 15;
 
-    console.log("Starting client migration...");
-    await migrateClients("./fakeClients.csv");
+    console.log(`Starting client migration for org: ${ORGANIZATION_TO_MIGRATE}...`);
+    await migrateClients("./fakeClients.csv", ORGANIZATION_TO_MIGRATE);
 
-    console.log("\nStarting volunteer migration...");
-    await migrateVolunteers("./fakeStaff.csv");
+    console.log(`\nStarting volunteer migration for org: ${ORGANIZATION_TO_MIGRATE}...`);
+    await migrateVolunteers("./fakeStaff.csv", ORGANIZATION_TO_MIGRATE);
 
-    console.log("\nStarting call data migration...");
-    await migrateCallData("./fakeCalls.csv");
+    console.log(`\nStarting call data migration for org: ${ORGANIZATION_TO_MIGRATE}...`);
+    await migrateCallData("./fakeCalls.csv", ORGANIZATION_TO_MIGRATE);
 
     console.log("\nAll migrations complete.");
 })();
