@@ -52,7 +52,7 @@ router.post("/save", async (req, res) => {
 /**
  * GET /api/reports/:user_id
  */
-app.get('/api/reports/:user_id', async (req, res) => {
+router.get('/reports/:user_id', async (req, res) => {
   try {
     const { user_id } = req.params;
 
