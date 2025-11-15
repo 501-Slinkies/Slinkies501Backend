@@ -31,11 +31,24 @@ async function sendEmail(to, subject, message) {
 }
 
 /**
- * Helper function to get volunteer by volunteer_id field
+ * Helper function to get volunteer by document ID or volunteer_id field
+ * Tries document ID first, then falls back to volunteer_id field query
  */
 async function getVolunteerByVolunteerId(volunteerId) {
   const db = getFirestore();
   try {
+    // First, try to fetch by document ID (driverUID often contains document IDs)
+    const docRef = db.collection("volunteers").doc(volunteerId);
+    const docSnapshot = await docRef.get();
+    
+    if (docSnapshot.exists) {
+      return { 
+        success: true, 
+        volunteer: { id: docSnapshot.id, ...docSnapshot.data() }
+      };
+    }
+
+    // Fallback: query by volunteer_id field
     const snapshot = await db.collection("volunteers")
       .where("volunteer_id", "==", volunteerId)
       .limit(1)
