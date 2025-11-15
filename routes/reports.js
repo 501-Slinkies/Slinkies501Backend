@@ -6,12 +6,9 @@ const admin = require("firebase-admin");
 const db = admin.firestore();
 
 /**
- * -------------------------------------------------
  * POST /api/reports/save
- * Save selected filters for ANY user (client/ride/volunteer)
- * -------------------------------------------------
  */
-router.post("/api/reports/save", async (req, res) => {
+router.post("/save", async (req, res) => {
   try {
     const { user_id, selectedParams } = req.body;
 
@@ -43,20 +40,13 @@ router.post("/api/reports/save", async (req, res) => {
 });
 
 /**
- * -------------------------------------------------
  * GET /api/reports/:user_id
- * Fetch saved filters + return fields from client's doc
- * Works for:
- *   - clients
- *   - rides
- *   - volunteers
- * -------------------------------------------------
  */
-router.get("/api/reports/:user_id", async (req, res) => {
+router.get("/:user_id", async (req, res) => {
   try {
     const user_id = req.params.user_id;
 
-    // 1️⃣ Get saved filters
+    // Get saved filters
     const savedSnapshot = await db
       .collection("savedReports")
       .where("user_id", "==", user_id)
@@ -75,7 +65,7 @@ router.get("/api/reports/:user_id", async (req, res) => {
     const savedData = savedSnapshot.docs[0].data();
     const filters = savedData.selectedParams;
 
-    // 2️⃣ Look in clients, rides, volunteers using DOC ID
+    // Check collections
     const collections = ["clients", "rides", "volunteers"];
     let foundCollection = null;
     let docData = null;
@@ -98,7 +88,7 @@ router.get("/api/reports/:user_id", async (req, res) => {
       });
     }
 
-    // 3️⃣ Build response with only selected fields
+    // Return only selected fields
     let reportData = {};
     filters.forEach((field) => {
       if (docData[field] !== undefined) {
