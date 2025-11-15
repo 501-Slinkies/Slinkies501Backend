@@ -11,7 +11,7 @@ const db = admin.firestore();
  * Save selected filters for ANY user (client/ride/volunteer)
  * -------------------------------------------------
  */
-router.post("/api/reports/save", async (req, res) => {
+router.post("/save", async (req, res) => {
   try {
     const { user_id, selectedParams } = req.body;
 
@@ -52,7 +52,7 @@ router.post("/api/reports/save", async (req, res) => {
  *   - volunteers
  * -------------------------------------------------
  */
-router.get("/api/reports/:user_id", async (req, res) => {
+router.get("/:user_id", async (req, res) => {
   try {
     const user_id = req.params.user_id;
 
