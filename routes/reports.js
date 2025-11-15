@@ -1,85 +1,123 @@
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-const admin = require('../firebase');
+
+// Firestore
+const admin = require("firebase-admin");
 const db = admin.firestore();
 
 /**
- * ---------------------------------------------------------
+ * -------------------------------------------------
  * POST /api/reports/save
- * Save selected report filters for a user.
- * ---------------------------------------------------------
+ * Save selected filters for ANY user (client/ride/volunteer)
+ * -------------------------------------------------
  */
-router.post('/save', async (req, res) => {
+router.post("/api/reports/save", async (req, res) => {
   try {
     const { user_id, selectedParams } = req.body;
 
     if (!user_id || !selectedParams) {
       return res.status(400).json({
         success: false,
-        message: "Missing user_id or selectedParams"
+        message: "Missing user_id or selectedParams",
       });
     }
 
-    const docRef = db.collection('reports').doc(user_id);
-
-    await docRef.set(
-      {
-        id: user_id,
-        filters_used: selectedParams,
-        updated_at: admin.firestore.FieldValue.serverTimestamp()
-      },
-      { merge: true }
-    );
+    const docRef = await db.collection("savedReports").add({
+      user_id,
+      selectedParams,
+      timestamp: new Date(),
+    });
 
     return res.status(200).json({
       success: true,
       message: "Saved successfully",
-      document_id: user_id
+      document_id: docRef.id,
     });
-
-  } catch (error) {
-    console.error("Error saving report:", error);
+  } catch (err) {
+    console.error("Error saving report:", err);
     return res.status(500).json({
       success: false,
-      message: "Server error"
+      message: "Internal server error",
     });
   }
 });
 
 /**
- * ---------------------------------------------------------
+ * -------------------------------------------------
  * GET /api/reports/:user_id
- * Retrieve saved report filters for a user.
- * ---------------------------------------------------------
+ * Fetch saved filters + return fields from client's doc
+ * Works for:
+ *   - clients
+ *   - rides
+ *   - volunteers
+ * -------------------------------------------------
  */
-router.get('/:user_id', async (req, res) => {
+router.get("/api/reports/:user_id", async (req, res) => {
   try {
-    const userId = req.params.user_id;
+    const user_id = req.params.user_id;
 
-    const docRef = db.collection('reports').doc(userId);
-    const snapshot = await docRef.get();
+    // 1️⃣ Get saved filters
+    const savedSnapshot = await db
+      .collection("savedReports")
+      .where("user_id", "==", user_id)
+      .limit(1)
+      .get();
 
-    if (!snapshot.exists) {
+    if (savedSnapshot.empty) {
       return res.status(200).json({
         success: true,
+        filters_used: [],
+        reports: {},
         message: "No saved report filters found",
-        reports: []
       });
     }
 
-    const data = snapshot.data();
+    const savedData = savedSnapshot.docs[0].data();
+    const filters = savedData.selectedParams;
+
+    // 2️⃣ Look in clients, rides, volunteers using DOC ID
+    const collections = ["clients", "rides", "volunteers"];
+    let foundCollection = null;
+    let docData = null;
+
+    for (const col of collections) {
+      const docSnap = await db.collection(col).doc(user_id).get();
+      if (docSnap.exists) {
+        foundCollection = col;
+        docData = docSnap.data();
+        break;
+      }
+    }
+
+    if (!foundCollection) {
+      return res.status(200).json({
+        success: true,
+        filters_used: filters,
+        reports: {},
+        message: "No matching doc found",
+      });
+    }
+
+    // 3️⃣ Build response with only selected fields
+    let reportData = {};
+    filters.forEach((field) => {
+      if (docData[field] !== undefined) {
+        reportData[field] = docData[field];
+      }
+    });
 
     return res.status(200).json({
       success: true,
-      filters_used: data.filters_used || [],
-      reports: data || {}
+      document_type: foundCollection,
+      filters_used: filters,
+      reports: reportData,
     });
 
-  } catch (error) {
-    console.error("Error getting report:", error);
+  } catch (err) {
+    console.error("Error fetching report:", err);
     return res.status(500).json({
       success: false,
-      message: "Server error"
+      message: "Internal server error",
     });
   }
 });
