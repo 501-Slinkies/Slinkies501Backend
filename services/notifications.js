@@ -31,10 +31,37 @@ async function sendEmail(to, subject, message) {
 }
 
 /**
+ * Helper function to get volunteer by volunteer_id field
+ */
+async function getVolunteerByVolunteerId(volunteerId) {
+  const db = getFirestore();
+  try {
+    const snapshot = await db.collection("volunteers")
+      .where("volunteer_id", "==", volunteerId)
+      .limit(1)
+      .get();
+    
+    if (snapshot.empty) {
+      return { success: false, error: "Volunteer not found" };
+    }
+
+    const doc = snapshot.docs[0];
+    return { 
+      success: true, 
+      volunteer: { id: doc.id, ...doc.data() }
+    };
+  } catch (error) {
+    console.error("Error fetching volunteer by volunteer_id:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
  * Notify all drivers under an organization about available rides.
- * - Queries rides by organization field directly
- * - Uses DataAccessLayer to fetch volunteers.
- * - Avoids duplicate emails.
+ * - Queries rides by organization field
+ * - Filters for unassigned rides with populated driverUID
+ * - driverUID contains CSV list of volunteer_id's
+ * - Sends email to volunteers using their email field
  */
 async function notifyDriversForOrganization(orgId) {
   try {
@@ -82,51 +109,71 @@ async function notifyDriversForOrganization(orgId) {
     
     console.log(`Found ${rides.length} ride(s) for org ${orgId}`);
 
-    // Step 2: Identify unique drivers who have rides assigned
-    const driverUIDs = new Set();
-    rides.forEach((ride) => {
-      // Check multiple possible driver field names
-      const driverId = ride.driverUID || ride.driverUid || ride.driverId || 
-                       ride.driver_uid || ride.driver_id || ride.DriverUID ||
-                       ride.assignedTo || ride.assigned_to;
+    // Step 2: Filter for unassigned rides with populated driverUID
+    const unassignedRidesWithDrivers = rides.filter((ride) => {
+      const status = ride.status || ride.Status || '';
+      const driverUID = ride.driverUID || ride.driverUid || ride.DriverUID || '';
       
-      if (driverId) {
-        // Handle comma-separated driver IDs
-        String(driverId)
+      // Check if status is "unassigned" (case-insensitive) and driverUID is populated
+      return status.toLowerCase() === 'unassigned' && 
+             driverUID && 
+             String(driverUID).trim().length > 0;
+    });
+
+    if (unassignedRidesWithDrivers.length === 0) {
+      console.log(`No unassigned rides with drivers found for org ${orgId}`);
+      return { success: true, message: "No rides available." };
+    }
+    
+    console.log(`Found ${unassignedRidesWithDrivers.length} unassigned ride(s) with drivers for org ${orgId}`);
+
+    // Step 3: Extract unique volunteer_id's from CSV driverUID fields
+    const volunteerIds = new Set();
+    unassignedRidesWithDrivers.forEach((ride) => {
+      const driverUID = ride.driverUID || ride.driverUid || ride.DriverUID || '';
+      
+      if (driverUID) {
+        // Handle comma-separated volunteer_id's
+        String(driverUID)
           .split(",")
           .map((id) => id.trim())
           .filter(Boolean)
-          .forEach((id) => driverUIDs.add(id));
+          .forEach((id) => volunteerIds.add(id));
       }
     });
 
-    if (driverUIDs.size === 0) {
-      console.log(`No drivers found with assigned rides for org ${orgId}`);
+    if (volunteerIds.size === 0) {
+      console.log(`No volunteer_id's found in driverUID fields for org ${orgId}`);
       return { success: true, message: "No drivers to notify." };
     }
     
-    console.log(`Found ${driverUIDs.size} unique driver(s) to notify`);
+    console.log(`Found ${volunteerIds.size} unique volunteer_id(s) to notify`);
 
-    // Step 3: Send one email per driver
-    const message =
-      "You have rides available for acceptance. Please visit https://axo-lift.webdev.gccis.rit.edu to review and accept available rides.";
+    // Step 4: Get driver acceptance endpoint (you may want to make this configurable)
+    const driverAcceptanceEndpoint = process.env.DRIVER_ACCEPTANCE_ENDPOINT || 
+                                     "https://axo-lift.webdev.gccis.rit.edu/driver/accept";
+
+    // Step 5: Send one email per volunteer
+    const message = `You have rides you can accept for ${orgId}, accept them here: ${driverAcceptanceEndpoint}`;
 
     let sentCount = 0;
-    for (const driverId of driverUIDs) {
-      const driverResult = await getVolunteerById(driverId);
-      if (!driverResult.success) {
-        console.warn(`Driver ${driverId} not found or invalid: ${driverResult.error}`);
+    for (const volunteerId of volunteerIds) {
+      const volunteerResult = await getVolunteerByVolunteerId(volunteerId);
+      if (!volunteerResult.success) {
+        console.warn(`Volunteer with volunteer_id ${volunteerId} not found: ${volunteerResult.error}`);
         continue;
       }
 
-      const driver = driverResult.volunteer;
-      if (!driver.email_address) {
-        console.warn(`Driver ${driverId} missing email address.`);
+      const volunteer = volunteerResult.volunteer;
+      const emailAddress = volunteer.email || volunteer.email_address;
+      
+      if (!emailAddress) {
+        console.warn(`Volunteer ${volunteerId} missing email address.`);
         continue;
       }
 
       const sendResult = await sendEmail(
-        driver.email_address,
+        emailAddress,
         "Rides Available for Acceptance",
         message
       );
