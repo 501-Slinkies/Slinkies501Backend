@@ -885,6 +885,98 @@ Authorization: Bearer YOUR_TOKEN (optional)
 }
 ```
 
+### 6. Get Unassigned Rides for Organization and Volunteer (GET)
+
+#### Endpoint
+```
+GET /api/organizations/:orgId/volunteers/:volunteerId/unassigned-rides
+```
+
+#### Description
+Returns all unassigned rides for a specific volunteer within an organization where:
+- The ride's `organization` field matches the provided `orgId`
+- The `volunteerId` is found in the ride's `driverUID` field (CSV string)
+- The ride's `status` is "unassigned" (case-insensitive)
+
+#### Examples
+```
+GET /api/organizations/bripen/volunteers/zvco96u8CWM2ryR1CyKvyJ17VHC3/unassigned-rides
+GET /api/organizations/GST-TRANS-001/volunteers/volunteer-firebase-id/unassigned-rides
+```
+
+#### Headers
+```
+Authorization: Bearer YOUR_TOKEN (optional)
+```
+
+#### Expected Response (Success - 200)
+```json
+{
+  "success": true,
+  "rides": [
+    {
+      "id": "ride-firebase-doc-id",
+      "UID": "RIDE-001",
+      "organization": "bripen",
+      "status": "Unassigned",
+      "driverUID": "zvco96u8CWM2ryR1CyKvyJ17VHC3,Ca0vqvSfcDREseZK0n0c",
+      "clientUID": "client-id",
+      "Date": "2025-11-04",
+      "pickupTime": "2:00 PM",
+      "appointmentTime": "2:30 PM",
+      ...
+    }
+  ],
+  "count": 1,
+  "orgId": "bripen",
+  "volunteerId": "zvco96u8CWM2ryR1CyKvyJ17VHC3"
+}
+```
+
+#### Expected Response (Success - No Rides Found - 200)
+```json
+{
+  "success": true,
+  "rides": [],
+  "count": 0,
+  "orgId": "bripen",
+  "volunteerId": "zvco96u8CWM2ryR1CyKvyJ17VHC3"
+}
+```
+
+#### Expected Response (Error - 400)
+```json
+{
+  "success": false,
+  "message": "Organization ID is required"
+}
+```
+
+or
+
+```json
+{
+  "success": false,
+  "message": "Volunteer ID is required"
+}
+```
+
+#### Expected Response (Error - 500)
+```json
+{
+  "success": false,
+  "message": "Internal server error",
+  "error": "Error details"
+}
+```
+
+#### Notes
+- The `volunteerId` can be either a Firestore document ID or a `volunteer_id` field value
+- The `driverUID` field is parsed as a comma-separated list (CSV) of volunteer IDs
+- Status matching is case-insensitive (e.g., "Unassigned", "unassigned", "UNASSIGNED" all match)
+- Supports multiple organization field name variations: `organization`, `Organization`, `org_id`, `orgId`, `organization_ID`
+- Queries both "rides" and "Rides" collections
+
 ---
 
 ## Drivers
@@ -1193,6 +1285,103 @@ Content-Type: application/json
 {
   "success": false,
   "message": "Missing userId, message, or type"
+}
+```
+
+### 2. Notify Organization Drivers (POST)
+
+#### Endpoint
+```
+POST /api/notify-org
+```
+
+#### Headers
+```
+Content-Type: application/json
+```
+
+#### Request Body
+```json
+{
+  "org_id": "bripen"
+}
+```
+
+#### Description
+This endpoint sends email notifications to all drivers in an organization who have unassigned rides available for acceptance.
+
+**How it works:**
+1. Queries all rides with `organization` field matching the provided `org_id`
+2. Filters for rides with `status: "unassigned"` and populated `driverUID` field
+3. Extracts `volunteer_id`'s from the CSV `driverUID` field (e.g., `",volunteer_id1,volunteer_id2"`)
+4. Looks up each volunteer by `volunteer_id` field
+5. Sends an email to each volunteer's email address
+
+#### Expected Response (Success - 200)
+```json
+{
+  "success": true,
+  "notified": 3
+}
+```
+
+#### Expected Response (Success - No Rides)
+```json
+{
+  "success": true,
+  "message": "No rides available."
+}
+```
+
+#### Expected Response (Success - No Drivers)
+```json
+{
+  "success": true,
+  "message": "No drivers to notify."
+}
+```
+
+#### Expected Response (Error - 400)
+```json
+{
+  "success": false,
+  "message": "Missing org_id"
+}
+```
+
+#### Expected Response (Error - 500)
+```json
+{
+  "success": false,
+  "message": "Internal server error",
+  "error": "Error message details"
+}
+```
+
+#### Email Content
+The email sent to drivers contains:
+- **Subject:** "Rides Available for Acceptance"
+- **Message:** "You have rides you can accept for {org_id}, accept them here: {driverAcceptanceEndpoint}"
+
+The `driverAcceptanceEndpoint` can be configured via the `DRIVER_ACCEPTANCE_ENDPOINT` environment variable, or defaults to `"https://axo-lift.webdev.gccis.rit.edu/driver/accept"`.
+
+#### Requirements
+- Rides must have:
+  - `organization` field matching the provided `org_id`
+  - `status: "unassigned"` (case-insensitive)
+  - `driverUID` field populated with comma-separated `volunteer_id` values
+- Volunteers must have:
+  - `volunteer_id` field matching the IDs in the ride's `driverUID` field
+  - `email` or `email_address` field populated
+
+#### Example Use Case
+Send notifications to all drivers in the "bripen" organization about unassigned rides they can accept:
+```json
+POST /api/notify-org
+Content-Type: application/json
+
+{
+  "org_id": "bripen"
 }
 ```
 
@@ -1574,6 +1763,21 @@ Content-Type: application/json
   "message": "Your ride is confirmed",
   "type": "email"
 }
+```
+
+### Notify Organization Drivers
+```json
+POST http://localhost:3000/api/notify-org
+Content-Type: application/json
+
+{
+  "org_id": "bripen"
+}
+```
+
+### Get Unassigned Rides for Organization and Volunteer
+```
+GET http://localhost:3000/api/organizations/bripen/volunteers/zvco96u8CWM2ryR1CyKvyJ17VHC3/unassigned-rides
 ```
 
 ---

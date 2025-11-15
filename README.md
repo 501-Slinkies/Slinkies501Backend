@@ -72,10 +72,12 @@ For a deeper walk-through of endpoints and example payloads, see `POSTMAN_TESTS.
 - `GET /api/volunteers/:volunteerId/unavailability` – fetch normalized recurring and single unavailability entries.
 - `POST /api/volunteers/:volunteerId/unavailability` – register unavailability blocks.
 - `GET /api/rides/...` – ride creation, retrieval, matching, and calendar aggregation routines.
+- `GET /api/organizations/:orgId/volunteers/:volunteerId/unassigned-rides` – get unassigned rides for a volunteer within an organization.
 - `GET /api/calendar` – fetch rides in a date window.
 - `GET /api/maps/verify`, `GET /api/maps/route` – address verification and routing (OpenStreetMap).
 - `GET /api/clients/:clientId/donations` – client donation history (Firestore query example).
 - `POST /api/notify` – email notification helper (SMS currently logs a mock message).
+- `POST /api/notify-org` – notify all drivers in an organization about available unassigned rides.
 
 Many more endpoints are defined in `routes/` and documented in `POSTMAN_TESTS.md`.
 

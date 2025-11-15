@@ -588,6 +588,91 @@ async function getRidesByDriverId(driverId) {
   }
 }
 
+async function getUnassignedRidesByOrganizationAndVolunteer(orgId, volunteerId) {
+  const db = getFirestore();
+  try {
+    if (!orgId || (typeof orgId === 'string' && orgId.trim() === '')) {
+      return { success: false, error: 'Organization ID is required' };
+    }
+
+    if (!volunteerId || (typeof volunteerId === 'string' && volunteerId.trim() === '')) {
+      return { success: false, error: 'Volunteer ID is required' };
+    }
+
+    const normalizedOrgId = typeof orgId === 'string' ? orgId.trim() : `${orgId}`;
+    const normalizedVolunteerId = typeof volunteerId === 'string' ? volunteerId.trim() : `${volunteerId}`;
+    
+    // Query rides by organization field (similar to notifications.js pattern)
+    const collectionsToCheck = ['rides', 'Rides'];
+    const organizationFields = ['organization', 'Organization', 'org_id', 'orgId', 'organization_ID'];
+    
+    let rides = [];
+    const seenKeys = new Set();
+    
+    for (const collectionName of collectionsToCheck) {
+      const collectionRef = db.collection(collectionName);
+      
+      for (const field of organizationFields) {
+        try {
+          const snapshot = await collectionRef.where(field, '==', normalizedOrgId).get();
+          
+          if (snapshot.empty) {
+            continue;
+          }
+          
+          snapshot.forEach(doc => {
+            const dedupeKey = `${collectionName}:${doc.id}`;
+            if (seenKeys.has(dedupeKey)) {
+              return;
+            }
+            seenKeys.add(dedupeKey);
+            rides.push({
+              id: doc.id,
+              ...doc.data()
+            });
+          });
+        } catch (error) {
+          console.warn(`Failed querying ${collectionName}.${field} for org ${normalizedOrgId}:`, error.message);
+        }
+      }
+    }
+
+    // Filter for unassigned rides where volunteer_id is in driverUID
+    const filteredRides = rides.filter((ride) => {
+      // Check status is "unassigned" (case-insensitive)
+      const status = ride.status || ride.Status || '';
+      if (status.toLowerCase() !== 'unassigned') {
+        return false;
+      }
+
+      // Check if volunteer_id is in driverUID CSV string
+      const driverUID = ride.driverUID || ride.driverUid || ride.DriverUID || '';
+      if (!driverUID) {
+        return false;
+      }
+
+      // Parse CSV and check if volunteer_id matches
+      const driverIds = String(driverUID)
+        .split(',')
+        .map(id => id.trim())
+        .filter(Boolean);
+
+      return driverIds.includes(normalizedVolunteerId);
+    });
+
+    return {
+      success: true,
+      rides: filteredRides,
+      count: filteredRides.length,
+      orgId: normalizedOrgId,
+      volunteerId: normalizedVolunteerId
+    };
+  } catch (error) {
+    console.error('Error fetching unassigned rides by organization and volunteer:', error);
+    return { success: false, error: error.message };
+  }
+}
+
 async function getRidesByDriverIdentifiers(identifiers) {
   const db = getFirestore();
   try {
@@ -1571,6 +1656,7 @@ module.exports = {
   getDestinationById,
   getRidesByDriverId,
   getRidesByDriverIdentifiers,
+  getUnassignedRidesByOrganizationAndVolunteer,
   createUser,
   getUserByEmail,
   getUserById,
