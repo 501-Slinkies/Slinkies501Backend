@@ -4,8 +4,24 @@ const router = express.Router();
 const { db } = require("../firebase");
 
 /* ============================================================================
+   HELPER: Detect Which Collection a Document ID Belongs To
+   ============================================================================ */
+async function detectCollectionById(docId) {
+  const collections = ["clients", "rides", "volunteers"];
+
+  for (const col of collections) {
+    const snap = await db.collection(col).doc(docId).get();
+    if (snap.exists) {
+      return { collection: col, data: snap.data() };
+    }
+  }
+
+  return null;
+}
+
+/* ============================================================================
    POST /api/reports/save
-   Saves: user_id + selectedParams (e.g., ["first_name","last_name"])
+   Saves filters for ANY Firestore document ID
    ============================================================================ */
 router.post("/save", async (req, res) => {
   try {
@@ -14,11 +30,11 @@ router.post("/save", async (req, res) => {
     if (!user_id) {
       return res.status(400).json({
         success: false,
-        message: "Missing user_id",
+        message: "Missing user_id (can be client_id, ride_id, or volunteer_id)",
       });
     }
 
-    // Ensure selectedParams is always an array
+    // Parse selectedParams safely
     if (typeof selectedParams === "string") {
       try {
         selectedParams = JSON.parse(selectedParams);
@@ -26,7 +42,7 @@ router.post("/save", async (req, res) => {
         selectedParams = selectedParams
           .replace(/[\[\]]/g, "")
           .split(",")
-          .map((f) => f.trim());
+          .map(f => f.trim());
       }
     }
 
@@ -37,7 +53,7 @@ router.post("/save", async (req, res) => {
       });
     }
 
-    // Save into Firestore
+    // Save filter settings for this resource ID
     await db.collection("savedReports").add({
       user_id,
       selectedParams,
@@ -46,16 +62,16 @@ router.post("/save", async (req, res) => {
 
     res.json({
       success: true,
-      message: "Report settings saved",
-      user_id,
+      message: "Report settings saved successfully",
+      target_document_id: user_id,
       saved_params: selectedParams,
     });
 
   } catch (error) {
-    console.error("❌ Error saving report:", error);
+    console.error("❌ POST /save error:", error);
     res.status(500).json({
       success: false,
-      message: "Server error",
+      message: "Server error in /save",
       error: error.message,
     });
   }
@@ -64,7 +80,7 @@ router.post("/save", async (req, res) => {
 
 /* ============================================================================
    GET /api/reports/:user_id
-   Loads user's last saved settings → returns REAL Firestore data
+   Loads saved filters → detects which collection the ID belongs to
    ============================================================================ */
 router.get("/:user_id", async (req, res) => {
   try {
@@ -77,7 +93,7 @@ router.get("/:user_id", async (req, res) => {
       });
     }
 
-    // Get latest saved filter settings for this user
+    // Load latest saved filter settings
     const snapshot = await db
       .collection("savedReports")
       .where("user_id", "==", user_id)
@@ -89,14 +105,13 @@ router.get("/:user_id", async (req, res) => {
       return res.json({
         success: true,
         message: "No saved report settings found",
-        reports: [],
+        reports: {},
       });
     }
 
-    const savedData = snapshot.docs[0].data();
-    let selectedParams = savedData.selectedParams;
+    let selectedParams = snapshot.docs[0].data().selectedParams;
 
-    // Ensure array
+    // Ensure params array
     if (typeof selectedParams === "string") {
       try {
         selectedParams = JSON.parse(selectedParams);
@@ -104,47 +119,49 @@ router.get("/:user_id", async (req, res) => {
         selectedParams = selectedParams
           .replace(/[\[\]]/g, "")
           .split(",")
-          .map((f) => f.trim());
+          .map(f => f.trim());
       }
     }
 
     /* -----------------------------------------------------------
-       FETCH REAL CLIENT DATA FROM FIRESTORE
+       Detect WHICH collection this ID belongs to
        ----------------------------------------------------------- */
-    const clientsSnap = await db.collection("clients").get();
+    const detected = await detectCollectionById(user_id);
 
-    const clients = clientsSnap.docs.map((doc) => ({
-      id: doc.id,
-      first_name: doc.data().first_name || "",
-      last_name: doc.data().last_name || "",
-    }));
+    if (!detected) {
+      return res.status(404).json({
+        success: false,
+        message: `Document ID ${user_id} not found in clients, rides, or volunteers.`,
+      });
+    }
+
+    const { collection, data } = detected;
 
     /* -----------------------------------------------------------
-       APPLY FILTERS (first_name, last_name)
+       Build filtered result
        ----------------------------------------------------------- */
-    const filteredClients = clients.map((client) => {
-      const filtered = {};
-      selectedParams.forEach((p) => {
-        if (client[p] !== undefined) {
-          filtered[p] = client[p];
-        }
-      });
-      return filtered;
+    const filtered = {};
+    selectedParams.forEach(p => {
+      if (data[p] !== undefined) {
+        filtered[p] = data[p];
+      }
     });
+
+    // Always include ID
+    filtered.id = user_id;
 
     res.json({
       success: true,
+      document_type: collection,
       filters_used: selectedParams,
-      reports: {
-        clients: filteredClients,
-      },
+      reports: filtered,
     });
 
   } catch (error) {
-    console.error("❌ Error generating report:", error);
+    console.error("❌ GET /:user_id error:", error);
     res.status(500).json({
       success: false,
-      message: "Server error",
+      message: "Server error in /:user_id",
       error: error.message,
     });
   }
@@ -152,8 +169,7 @@ router.get("/:user_id", async (req, res) => {
 
 
 /* ============================================================================
-   GET /api/reports/all
-   Returns ALL clients (clean), ALL rides, ALL volunteers
+   GET /api/reports/all   (unchanged — returns all data)
    ============================================================================ */
 router.get("/all", async (req, res) => {
   try {
@@ -161,20 +177,16 @@ router.get("/all", async (req, res) => {
     const ridesSnap = await db.collection("rides").get();
     const volunteersSnap = await db.collection("volunteers").get();
 
-    // Clean client output
     const clients = clientsSnap.docs.map(doc => ({
       id: doc.id,
-      first_name: doc.data().first_name || "",
-      last_name: doc.data().last_name || "",
+      ...doc.data(),
     }));
 
-    // Rides (full fields)
     const rides = ridesSnap.docs.map(doc => ({
       id: doc.id,
       ...doc.data(),
     }));
 
-    // Volunteers (full fields)
     const volunteers = volunteersSnap.docs.map(doc => ({
       id: doc.id,
       ...doc.data(),
@@ -188,13 +200,14 @@ router.get("/all", async (req, res) => {
     });
 
   } catch (error) {
-    console.error("❌ Error fetching ALL:", error);
+    console.error("❌ /all error:", error);
     res.status(500).json({
       success: false,
-      message: "Server error",
+      message: "Server error in /all",
       error: error.message,
     });
   }
 });
+
 
 module.exports = router;
