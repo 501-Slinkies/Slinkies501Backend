@@ -66,68 +66,33 @@ app.post('/api/login', async (req, res) => {
 
 app.post('/api/roles', async (req, res) => {
   try {
-    // Extract JWT token from Authorization header
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).send({ 
-        success: false, 
-        message: 'Authorization token required. Please provide a Bearer token in the Authorization header.' 
-      });
-    }
-
-    const token = authHeader.substring(7); // Remove 'Bearer ' prefix
-    
-    // Extract role data from request body
-    const { name, title, permissions } = req.body;
+    // Extract role data from request body - only name, org_id, and parentRole
+    const { name, org_id, parentRole } = req.body;
     
     // Validate required fields
-    if (!name || !title || !permissions) {
+    if (!name || !org_id) {
       return res.status(400).send({
         success: false,
-        message: 'Role name, title, and permissions are required',
+        message: 'Role name and org_id are required',
         required_fields: {
           name: 'string - unique identifier for the role',
-          title: 'string - display title for the role',
-          permissions: {
-            create_clients: 'boolean',
-            read_clients: 'boolean',
-            update_clients: 'boolean',
-            delete_clients: 'boolean',
-            create_org: 'boolean',
-            read_org: 'boolean',
-            update_org: 'boolean',
-            delete_org: 'boolean',
-            create_rides: 'boolean',
-            read_rides: 'boolean',
-            update_rides: 'boolean',
-            delete_rides: 'boolean',
-            create_users: 'boolean',
-            read_users: 'boolean',
-            update_users: 'boolean',
-            delete_users: 'boolean',
-            create_volunteers: 'boolean',
-            read_volunteers: 'boolean',
-            update_volunteers: 'boolean',
-            delete_volunteers: 'boolean',
-            read_logs: 'boolean'
-          }
+          org_id: 'string - organization ID',
+          parentRole: 'string (optional) - parent role name'
         }
       });
     }
 
-    const roleData = { name, title, permissions };
+    const roleData = { name, org_id, parentRole };
     
-    // Create role and permissions
-    const result = await applicationLayer.createRoleWithPermissions(roleData, token);
+    // Create role only (no permissions) - no token checking
+    const result = await applicationLayer.createRoleWithPermissions(roleData, null);
     
     if (result.success) {
       res.status(201).send(result);
     } else {
       // Determine appropriate status code based on error type
       let statusCode = 500; // Default to internal server error
-      if (result.message.includes('Authentication failed') || result.message.includes('token')) {
-        statusCode = 401;
-      } else if (result.message.includes('required') || result.message.includes('Organization information not found')) {
+      if (result.message && result.message.includes('required')) {
         statusCode = 400;
       }
       
@@ -135,6 +100,68 @@ app.post('/api/roles', async (req, res) => {
     }
   } catch (error) {
     console.error('Error in /roles endpoint:', error);
+    res.status(500).send({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+});
+
+// Create permissions for a role and update the role with a document reference
+app.post('/api/permissions', async (req, res) => {
+  try {
+    // Extract permission data from request body
+    const { roleName, ...permissionBooleans } = req.body;
+    
+    // Validate required fields
+    if (!roleName) {
+      return res.status(400).send({
+        success: false,
+        message: 'Role name is required',
+        required_fields: {
+          roleName: 'string - name of the role to attach permissions to',
+          create_clients: 'boolean (optional)',
+          read_clients: 'boolean (optional)',
+          update_clients: 'boolean (optional)',
+          delete_clients: 'boolean (optional)',
+          create_org: 'boolean (optional)',
+          read_org: 'boolean (optional)',
+          update_org: 'boolean (optional)',
+          delete_org: 'boolean (optional)',
+          create_rides: 'boolean (optional)',
+          read_rides: 'boolean (optional)',
+          update_rides: 'boolean (optional)',
+          delete_rides: 'boolean (optional)',
+          create_roles: 'boolean (optional)',
+          read_roles: 'boolean (optional)',
+          update_roles: 'boolean (optional)',
+          delete_roles: 'boolean (optional)',
+          create_volunteers: 'boolean (optional)',
+          read_volunteers: 'boolean (optional)',
+          update_volunteers: 'boolean (optional)',
+          delete_volunteers: 'boolean (optional)',
+          read_logs: 'boolean (optional)'
+        }
+      });
+    }
+
+    // Create permission document and update role with reference - no token checking
+    const result = await applicationLayer.createPermissionForRole(roleName, permissionBooleans, null);
+    
+    if (result.success) {
+      res.status(201).send(result);
+    } else {
+      // Determine appropriate status code based on error type
+      let statusCode = 500; // Default to internal server error
+      if (result.message && (result.message.includes('required') || result.message.includes('not found'))) {
+        statusCode = 400;
+      }
+      
+      res.status(statusCode).send(result);
+    }
+  } catch (error) {
+    console.error('Error in /permissions endpoint:', error);
     res.status(500).send({
       success: false,
       message: 'Internal server error',

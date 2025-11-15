@@ -59,17 +59,46 @@ async function login(username, password) {
 async function createRole(roleData) {
   const db = getFirestore();
   try {
-    // Create the role document
-    const roleRef = db.collection("roles").doc(roleData.name);
-    await roleRef.set({
-      title: roleData.title,
-      org: roleData.org,
-      permission_set: roleData.name, // Reference to the permission document
-      created_at: new Date(),
-      updated_at: new Date()
-    });
+    if (!roleData.name || !roleData.org_id) {
+      return { success: false, error: 'Role name and org_id are required' };
+    }
 
-    return { success: true, roleId: roleData.name };
+    // Try multiple collection names for compatibility
+    const roleCollections = ['roles', 'Roles', 'role', 'Role'];
+    
+    for (const collectionName of roleCollections) {
+      try {
+        const roleRef = db.collection(collectionName).doc(roleData.name);
+        const docSnapshot = await roleRef.get();
+        
+        if (docSnapshot.exists) {
+          return { success: false, error: 'Role with this name already exists' };
+        }
+
+        // Create the role document with only name, org_id, and parentRole
+        const roleDocument = {
+          name: roleData.name,
+          org_id: roleData.org_id,
+          created_at: new Date(),
+          updated_at: new Date()
+        };
+
+        // Add parentRole only if provided
+        if (roleData.parentRole) {
+          roleDocument.parentRole = roleData.parentRole;
+        }
+
+        await roleRef.set(roleDocument);
+
+        return { success: true, roleId: roleData.name, collection: collectionName };
+      } catch (error) {
+        // If this collection doesn't work, try the next one
+        console.warn(`Failed to create role in ${collectionName}:`, error.message);
+        continue;
+      }
+    }
+
+    return { success: false, error: 'Failed to create role in any collection' };
   } catch (error) {
     console.error("Error creating role:", error);
     return { success: false, error: error.message };
@@ -79,49 +108,144 @@ async function createRole(roleData) {
 async function createPermission(permissionData) {
   const db = getFirestore();
   try {
-    // Create the permission document
-    const permissionRef = db.collection("permissions").doc(permissionData.name);
-    await permissionRef.set({
-      // CRUD operations for clients
-      create_clients: permissionData.create_clients || false,
-      read_clients: permissionData.read_clients || false,
-      update_clients: permissionData.update_clients || false,
-      delete_clients: permissionData.delete_clients || false,
-      
-      // CRUD operations for organization
-      create_org: permissionData.create_org || false,
-      read_org: permissionData.read_org || false,
-      update_org: permissionData.update_org || false,
-      delete_org: permissionData.delete_org || false,
-      
-      // CRUD operations for rides
-      create_rides: permissionData.create_rides || false,
-      read_rides: permissionData.read_rides || false,
-      update_rides: permissionData.update_rides || false,
-      delete_rides: permissionData.delete_rides || false,
-      
-      // CRUD operations for users
-      create_users: permissionData.create_users || false,
-      read_users: permissionData.read_users || false,
-      update_users: permissionData.update_users || false,
-      delete_users: permissionData.delete_users || false,
-      
-      // CRUD operations for volunteers
-      create_volunteers: permissionData.create_volunteers || false,
-      read_volunteers: permissionData.read_volunteers || false,
-      update_volunteers: permissionData.update_volunteers || false,
-      delete_volunteers: permissionData.delete_volunteers || false,
-      
-      // Read logs permission
-      read_logs: permissionData.read_logs || false,
-      
-      created_at: new Date(),
-      updated_at: new Date()
-    });
+    if (!permissionData.name) {
+      return { success: false, error: 'Permission name is required' };
+    }
 
-    return { success: true, permissionId: permissionData.name };
+    // Try multiple collection names for compatibility
+    const permissionCollections = ['Permissions', 'permissions', 'Permission', 'permission'];
+    
+    for (const collectionName of permissionCollections) {
+      try {
+        const permissionRef = db.collection(collectionName).doc(permissionData.name);
+        const docSnapshot = await permissionRef.get();
+        
+        if (docSnapshot.exists) {
+          return { success: false, error: 'Permission with this name already exists' };
+        }
+
+        // Create the permission document with all boolean values
+        await permissionRef.set({
+          // CRUD operations for clients
+          create_clients: permissionData.create_clients === true,
+          read_clients: permissionData.read_clients === true,
+          update_clients: permissionData.update_clients === true,
+          delete_clients: permissionData.delete_clients === true,
+          
+          // CRUD operations for organization
+          create_org: permissionData.create_org === true,
+          read_org: permissionData.read_org === true,
+          update_org: permissionData.update_org === true,
+          delete_org: permissionData.delete_org === true,
+          
+          // CRUD operations for rides
+          create_rides: permissionData.create_rides === true,
+          read_rides: permissionData.read_rides === true,
+          update_rides: permissionData.update_rides === true,
+          delete_rides: permissionData.delete_rides === true,
+          
+          // CRUD operations for roles
+          create_roles: permissionData.create_roles === true,
+          read_roles: permissionData.read_roles === true,
+          update_roles: permissionData.update_roles === true,
+          delete_roles: permissionData.delete_roles === true,
+          
+          // CRUD operations for volunteers
+          create_volunteers: permissionData.create_volunteers === true,
+          read_volunteers: permissionData.read_volunteers === true,
+          update_volunteers: permissionData.update_volunteers === true,
+          delete_volunteers: permissionData.delete_volunteers === true,
+          
+          // Read logs permission
+          read_logs: permissionData.read_logs === true,
+          
+          created_at: new Date(),
+          updated_at: new Date()
+        });
+
+        return { success: true, permissionId: permissionData.name, permissionRef: permissionRef, collection: collectionName };
+      } catch (error) {
+        console.warn(`Failed to create permission in ${collectionName}:`, error.message);
+        continue;
+      }
+    }
+
+    return { success: false, error: 'Failed to create permission in any collection' };
   } catch (error) {
     console.error("Error creating permission:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+async function createPermissionAndUpdateRole(roleName, permissionData) {
+  const db = getFirestore();
+  try {
+    if (!roleName) {
+      return { success: false, error: 'Role name is required' };
+    }
+
+    if (!permissionData) {
+      return { success: false, error: 'Permission data is required' };
+    }
+
+    // Set the permission name (will use roleName as the permission document ID)
+    permissionData.name = roleName;
+
+    // Create the permission document
+    const permissionResult = await createPermission(permissionData);
+    
+    if (!permissionResult.success) {
+      return permissionResult;
+    }
+
+    // Now update the role document to reference the permission
+    const roleCollections = ['roles', 'Roles', 'role', 'Role'];
+    let roleUpdated = false;
+    let roleCollection = null;
+    
+    for (const collectionName of roleCollections) {
+      try {
+        const roleRef = db.collection(collectionName).doc(roleName);
+        const roleDoc = await roleRef.get();
+        
+        if (roleDoc.exists) {
+          // Create a document reference to the permission
+          const permissionRef = db.collection(permissionResult.collection).doc(roleName);
+          
+          // Update the role with the permission_set reference
+          await roleRef.update({
+            permission_set: permissionRef,
+            updated_at: new Date()
+          });
+          
+          roleUpdated = true;
+          roleCollection = collectionName;
+          break;
+        }
+      } catch (error) {
+        console.warn(`Failed to update role in ${collectionName}:`, error.message);
+        continue;
+      }
+    }
+
+    if (!roleUpdated) {
+      // Permission was created but role wasn't found/updated
+      // We could optionally delete the permission, but for now just return a warning
+      return { 
+        success: false, 
+        error: 'Permission created but role not found to update. Role may need to be created first.' 
+      };
+    }
+
+    return { 
+      success: true, 
+      permissionId: permissionResult.permissionId,
+      roleName: roleName,
+      permissionRef: permissionResult.permissionRef,
+      roleCollection: roleCollection
+    };
+  } catch (error) {
+    console.error("Error creating permission and updating role:", error);
     return { success: false, error: error.message };
   }
 }
@@ -1638,7 +1762,8 @@ async function addVolunteerUnavailability(volunteerId, entries = []) {
 module.exports = { 
   login, 
   createRole, 
-  createPermission, 
+  createPermission,
+  createPermissionAndUpdateRole, 
   getRoleByName,
   getRolesByOrganization,
   getPermissionSetByRoleName,
