@@ -7,7 +7,7 @@ const _ = require("lodash");
 /**
  * ✅ GET /api/reports
  * Example:
- * /api/reports?client_name=true&ride_status=true&start=2025-01-01&end=2025-12-31
+ * /api/reports?first_name=true&last_name=true&start=2025-01-01&end=2025-12-31
  */
 router.get("/", async (req, res) => {
   try {
@@ -15,32 +15,46 @@ router.get("/", async (req, res) => {
     const startDate = start ? new Date(start) : new Date("2000-01-01");
     const endDate = end ? new Date(end) : new Date();
 
-    // Collect requested fields from the query
+    // Collect requested fields
     const requestedFields = Object.keys(req.query)
-      .filter(key => req.query[key] === "true")
-      .map(key => key.toLowerCase());
+      .filter((key) => req.query[key] === "true")
+      .map((key) => key.toLowerCase());
 
-    const reportsData = await getReportData(requestedFields, startDate, endDate, organization);
+    const reportsData = await getReportData(
+      requestedFields,
+      startDate,
+      endDate,
+      organization
+    );
 
-    // Convert all fields to snake_case before sending to FlutterFlow
-    const snakeCaseResponse = _.mapKeys(reportsData, (value, key) => _.snakeCase(key));
+    // Convert object keys to snake_case
+    const snakeCaseResponse = _.mapValues(reportsData, (value) =>
+      value.map((item) =>
+        _.mapKeys(item, (v, k) => _.snakeCase(k))
+      )
+    );
 
     res.json({ success: true, reports: snakeCaseResponse });
   } catch (error) {
     console.error("Error generating reports:", error);
-    res.status(500).json({ success: false, message: "Server error", error: error.message });
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
   }
 });
 
+// ===========================================================================
 // ✅ POST /api/reports/save
-// ✅ POST /api/reports/save
+// ===========================================================================
 router.post("/save", async (req, res) => {
   try {
     console.log("🔥 POST BODY RECEIVED:", JSON.stringify(req.body, null, 2));
 
     let { user_id, selectedParams } = req.body;
 
-    // 🧠 Handle both array and string formats
+    // Parse array or string
     if (typeof selectedParams === "string") {
       try {
         selectedParams = JSON.parse(selectedParams);
@@ -66,20 +80,18 @@ router.post("/save", async (req, res) => {
       });
     }
 
-    // ✅ Save to Firestore
+    // Save to Firestore
     await db.collection("savedReports").add({
       user_id,
       selectedParams,
       timestamp: new Date(),
     });
 
-    // 🔥 Return ONLY user_id (not document_id)
     res.json({
       success: true,
       message: "Saved successfully",
       user_id: user_id,
     });
-
   } catch (error) {
     console.error("❌ Error saving report:", error);
     res.status(500).json({
@@ -90,21 +102,21 @@ router.post("/save", async (req, res) => {
   }
 });
 
-
-/**
- * ✅ GET /api/reports/:user_id
- * Reads the last saved report preferences and returns report data
- */
+// ===========================================================================
+// ✅ GET /api/reports/:user_id
+// ===========================================================================
 router.get("/:user_id", async (req, res) => {
   try {
     const { user_id } = req.params;
     const { start, end, organization } = req.query;
 
     if (!user_id) {
-      return res.status(400).json({ success: false, message: "Missing user_id" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Missing user_id" });
     }
 
-    // Get last saved selection for this user
+    // Pull last saved filters
     const snapshot = await db
       .collection("savedReports")
       .where("user_id", "==", user_id)
@@ -113,30 +125,43 @@ router.get("/:user_id", async (req, res) => {
       .get();
 
     if (snapshot.empty) {
-      return res.json({ success: true, reports: [], message: "No saved report filters found" });
+      return res.json({
+        success: true,
+        reports: [],
+        message: "No saved report filters found",
+      });
     }
 
     const saved = snapshot.docs[0].data();
-    let selectedParams = saved.selectedParams; // e.g. ["first_name", "last_name"]
+    let selectedParams = saved.selectedParams;
 
-    // ✅ ensure selectedParams is always an array
     if (typeof selectedParams === "string") {
       try {
         selectedParams = JSON.parse(selectedParams);
       } catch {
-        selectedParams = selectedParams.replace(/[\[\]]/g, "").split(",").map(f => f.trim());
+        selectedParams = selectedParams
+          .replace(/[\[\]]/g, "")
+          .split(",")
+          .map((f) => f.trim());
       }
     }
 
-    // If FF passed dates, use them, otherwise default
     const startDate = start ? new Date(start) : new Date("2000-01-01");
     const endDate = end ? new Date(end) : new Date();
 
-    // Run the report using stored params
-    const reportsData = await getReportData(selectedParams, startDate, endDate, organization);
+    // Replace data based on filters
+    const reportsData = await getReportData(
+      selectedParams,
+      startDate,
+      endDate,
+      organization
+    );
 
-    // Convert keys to snake_case before sending
-    const snakeCaseResponse = _.mapKeys(reportsData, (v, k) => _.snakeCase(k));
+    const snakeCaseResponse = _.mapValues(reportsData, (value) =>
+      value.map((item) =>
+        _.mapKeys(item, (v, k) => _.snakeCase(k))
+      )
+    );
 
     return res.json({
       success: true,
@@ -154,81 +179,116 @@ router.get("/:user_id", async (req, res) => {
 });
 
 // ===========================================================================
-// ✅ Report generators (Clients, Rides, Volunteers, Meta)
+// 🔥 REPORT DATA BUILDERS
 // ===========================================================================
+
 async function getReportData(fields, startDate, endDate, organization) {
   const results = {};
 
-  if (fields.includes("client_name") || fields.includes("date_of_birth")) {
+  // CLIENTS (first + last name only)
+  if (fields.includes("first_name") || fields.includes("last_name")) {
     results.clients = await getClientsData(startDate, endDate, organization);
   }
 
-  if (fields.includes("ride_status") || fields.includes("trip_mileage") || fields.includes("driver_id")) {
+  // RIDES
+  if (
+    fields.includes("ride_status") ||
+    fields.includes("trip_mileage") ||
+    fields.includes("driver_id")
+  ) {
     results.rides = await getRideVolume(startDate, endDate, organization);
   }
 
-  if (fields.includes("volunteering_status") || fields.includes("mobility_assistance")) {
-    results.volunteers = await getVolunteerData(startDate, endDate, organization);
+  // VOLUNTEERS
+  if (
+    fields.includes("volunteering_status") ||
+    fields.includes("mobility_assistance")
+  ) {
+    results.volunteers = await getVolunteerData(
+      startDate,
+      endDate,
+      organization
+    );
   }
 
-  if (fields.includes("security_assignment") || fields.includes("date_enrolled") || fields.includes("m_f")) {
-    results.client_metadata = await getClientMetadata(startDate, endDate, organization);
+  // METADATA
+  if (
+    fields.includes("security_assignment") ||
+    fields.includes("date_enrolled") ||
+    fields.includes("m_f")
+  ) {
+    results.client_metadata = await getClientMetadata(
+      startDate,
+      endDate,
+      organization
+    );
   }
 
   return results;
 }
 
-// ✅ Fetch Clients data
+// ===========================================================================
+// 🔥 CLIENTS: FIRST + LAST NAME ONLY
+// ===========================================================================
 async function getClientsData(startDate, endDate, organization) {
   let query = db.collection("clients");
-  if (organization) query = query.where("organization_id", "==", organization);
+  if (organization)
+    query = query.where("organization_id", "==", organization);
 
   const snapshot = await query.get();
-  return snapshot.docs.map(doc => ({
-    client_name: doc.data().client_name || "",
-    date_of_birth: doc.data().date_of_birth || "",
-    volunteering_status: doc.data().volunteering_status || "",
-    mobility_assistance: doc.data().mobility_assistance || "",
-    date_enrolled: doc.data().date_enrolled || "",
-    m_f: doc.data().m_f || "",
+  return snapshot.docs.map((doc) => ({
+    first_name: doc.data().first_name || "",
+    last_name: doc.data().last_name || "",
   }));
 }
 
-// ✅ Fetch Rides data
+// ===========================================================================
+// 🔥 RIDES
+// ===========================================================================
 async function getRideVolume(startDate, endDate, organization) {
   let query = db
     .collection("rides")
     .where("date", ">=", startDate)
     .where("date", "<=", endDate);
-  if (organization) query = query.where("organization_id", "==", organization);
+
+  if (organization)
+    query = query.where("organization_id", "==", organization);
 
   const snapshot = await query.get();
-  return snapshot.docs.map(doc => ({
+  return snapshot.docs.map((doc) => ({
     ride_status: doc.data().status || doc.data().ride_status || "",
-    trip_mileage: doc.data().MilesDriven || doc.data().miles_driven || "",
-    driver_id: doc.data().Driver || doc.data().driver_volunteer_ref || "",
+    trip_mileage:
+      doc.data().MilesDriven || doc.data().miles_driven || "",
+    driver_id:
+      doc.data().Driver || doc.data().driver_volunteer_ref || "",
   }));
 }
 
-// ✅ Fetch Volunteer data
+// ===========================================================================
+// 🔥 VOLUNTEERS
+// ===========================================================================
 async function getVolunteerData(startDate, endDate, organization) {
   let query = db.collection("volunteers");
-  if (organization) query = query.where("organization_id", "==", organization);
+  if (organization)
+    query = query.where("organization_id", "==", organization);
 
   const snapshot = await query.get();
-  return snapshot.docs.map(doc => ({
+  return snapshot.docs.map((doc) => ({
     volunteering_status: doc.data().volunteering_status || "",
     mobility_assistance: doc.data().mobility_assistance || "",
   }));
 }
 
-// ✅ Fetch additional metadata
+// ===========================================================================
+// 🔥 CLIENT METADATA
+// ===========================================================================
 async function getClientMetadata(startDate, endDate, organization) {
   let query = db.collection("clients");
-  if (organization) query = query.where("organization_id", "==", organization);
+  if (organization)
+    query = query.where("organization_id", "==", organization);
 
   const snapshot = await query.get();
-  return snapshot.docs.map(doc => ({
+  return snapshot.docs.map((doc) => ({
     security_assignment: doc.data().security_assignment || "",
     date_enrolled: doc.data().date_enrolled || "",
     m_f: doc.data().m_f || "",
