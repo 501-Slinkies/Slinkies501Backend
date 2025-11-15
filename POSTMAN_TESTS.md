@@ -89,7 +89,7 @@ Content-Type: application/json
 
 ## Roles
 
-### 1. Create Role with Permissions (POST)
+### 1. Create Role (POST)
 
 #### Endpoint
 ```
@@ -99,37 +99,26 @@ POST /api/roles
 #### Headers
 ```
 Content-Type: application/json
-Authorization: Bearer YOUR_TOKEN (required)
+Authorization: Bearer YOUR_TOKEN (optional - currently disabled)
 ```
+
+#### Description
+Creates a new role document with only `name`, `org_id`, and optionally `parentRole`. Permissions are created separately using the `/api/permissions` endpoint. Token checking is currently disabled.
 
 #### Request Body
 ```json
 {
   "name": "coordinator",
-  "title": "Ride Coordinator",
-  "permissions": {
-    "create_clients": true,
-    "read_clients": true,
-    "update_clients": true,
-    "delete_clients": false,
-    "create_org": false,
-    "read_org": true,
-    "update_org": false,
-    "delete_org": false,
-    "create_rides": true,
-    "read_rides": true,
-    "update_rides": true,
-    "delete_rides": false,
-    "create_users": false,
-    "read_users": true,
-    "update_users": false,
-    "delete_users": false,
-    "create_volunteers": false,
-    "read_volunteers": true,
-    "update_volunteers": false,
-    "delete_volunteers": false,
-    "read_logs": true
-  }
+  "org_id": "bripen",
+  "parentRole": "default_coordinator"
+}
+```
+
+#### Request Body (Minimal - without parentRole)
+```json
+{
+  "name": "coordinator",
+  "org_id": "bripen"
 }
 ```
 
@@ -137,13 +126,154 @@ Authorization: Bearer YOUR_TOKEN (required)
 ```json
 {
   "success": true,
-  "message": "Role and permissions created successfully",
-  "roleId": "coordinator",
-  "permissionId": "coordinator"
+  "message": "Role created successfully",
+  "data": {
+    "roleId": "coordinator",
+    "collection": "roles"
+  }
 }
 ```
 
-### 2. Get Parent Role (GET)
+#### Expected Response (Error - 400)
+```json
+{
+  "success": false,
+  "message": "Role name and org_id are required",
+  "required_fields": {
+    "name": "string - unique identifier for the role",
+    "org_id": "string - organization ID",
+    "parentRole": "string (optional) - parent role name"
+  }
+}
+```
+
+#### Expected Response (Error - 400 - Role Exists)
+```json
+{
+  "success": false,
+  "message": "Failed to create role",
+  "error": "Role with this name already exists"
+}
+```
+
+---
+
+### 2. Create Permissions for Role (POST)
+
+#### Endpoint
+```
+POST /api/permissions
+```
+
+#### Headers
+```
+Content-Type: application/json
+Authorization: Bearer YOUR_TOKEN (optional - currently disabled)
+```
+
+#### Description
+Creates a permissions document in the Permissions collection with all the boolean permission values, and updates the role document to have a `permission_set` field that is a Firestore document reference to the Permissions document. The role must already exist before creating permissions. Token checking is currently disabled.
+
+#### Request Body
+```json
+{
+  "roleName": "coordinator",
+  "create_clients": true,
+  "read_clients": true,
+  "update_clients": true,
+  "delete_clients": false,
+  "create_org": false,
+  "read_org": true,
+  "update_org": false,
+  "delete_org": false,
+  "create_rides": true,
+  "read_rides": true,
+  "update_rides": true,
+  "delete_rides": false,
+  "create_roles": true,
+  "read_roles": true,
+  "update_roles": true,
+  "delete_roles": false,
+  "create_volunteers": false,
+  "read_volunteers": true,
+  "update_volunteers": false,
+  "delete_volunteers": false,
+  "read_logs": true
+}
+```
+
+#### Expected Response (Success - 201)
+```json
+{
+  "success": true,
+  "message": "Permission created and role updated successfully",
+  "data": {
+    "permissionId": "coordinator",
+    "roleName": "coordinator",
+    "roleCollection": "roles"
+  }
+}
+```
+
+#### Expected Response (Error - 400)
+```json
+{
+  "success": false,
+  "message": "Role name is required",
+  "required_fields": {
+    "roleName": "string - name of the role to attach permissions to",
+    "create_clients": "boolean (optional)",
+    "read_clients": "boolean (optional)",
+    "update_clients": "boolean (optional)",
+    "delete_clients": "boolean (optional)",
+    "create_org": "boolean (optional)",
+    "read_org": "boolean (optional)",
+    "update_org": "boolean (optional)",
+    "delete_org": "boolean (optional)",
+    "create_rides": "boolean (optional)",
+    "read_rides": "boolean (optional)",
+    "update_rides": "boolean (optional)",
+    "delete_rides": "boolean (optional)",
+    "create_roles": "boolean (optional)",
+    "read_roles": "boolean (optional)",
+    "update_roles": "boolean (optional)",
+    "delete_roles": "boolean (optional)",
+    "create_volunteers": "boolean (optional)",
+    "read_volunteers": "boolean (optional)",
+    "update_volunteers": "boolean (optional)",
+    "delete_volunteers": "boolean (optional)",
+    "read_logs": "boolean (optional)"
+  }
+}
+```
+
+#### Expected Response (Error - 400 - Role Not Found)
+```json
+{
+  "success": false,
+  "message": "Failed to create permission and update role",
+  "error": "Permission created but role not found to update. Role may need to be created first."
+}
+```
+
+#### Expected Response (Error - 400 - Permission Exists)
+```json
+{
+  "success": false,
+  "message": "Failed to create permission and update role",
+  "error": "Permission with this name already exists"
+}
+```
+
+#### Notes
+- The `roleName` must match an existing role document name
+- All permission fields are optional boolean values (defaults to `false` if not provided)
+- The `permission_set` field in the role document will be a Firestore DocumentReference pointing to the Permissions document
+- Permissions are stored in the `Permissions` collection (capital P)
+
+---
+
+### 3. Get Parent Role (GET)
 
 #### Endpoint
 ```
@@ -172,7 +302,7 @@ Authorization: Bearer YOUR_TOKEN (optional)
 }
 ```
 
-### 3. Get Parent Role View (GET)
+### 4. Get Parent Role View (GET)
 
 #### Endpoint
 ```
@@ -429,7 +559,7 @@ Content-Type: application/json
 
 ## Roles
 
-### 1. Create Role with Permissions (POST)
+### 1. Create Role (POST)
 
 #### Endpoint
 ```
@@ -439,37 +569,26 @@ POST /api/roles
 #### Headers
 ```
 Content-Type: application/json
-Authorization: Bearer YOUR_TOKEN (required)
+Authorization: Bearer YOUR_TOKEN (optional - currently disabled)
 ```
+
+#### Description
+Creates a new role document with only `name`, `org_id`, and optionally `parentRole`. Permissions are created separately using the `/api/permissions` endpoint. Token checking is currently disabled.
 
 #### Request Body
 ```json
 {
   "name": "coordinator",
-  "title": "Ride Coordinator",
-  "permissions": {
-    "create_clients": true,
-    "read_clients": true,
-    "update_clients": true,
-    "delete_clients": false,
-    "create_org": false,
-    "read_org": true,
-    "update_org": false,
-    "delete_org": false,
-    "create_rides": true,
-    "read_rides": true,
-    "update_rides": true,
-    "delete_rides": false,
-    "create_users": false,
-    "read_users": true,
-    "update_users": false,
-    "delete_users": false,
-    "create_volunteers": false,
-    "read_volunteers": true,
-    "update_volunteers": false,
-    "delete_volunteers": false,
-    "read_logs": true
-  }
+  "org_id": "bripen",
+  "parentRole": "default_coordinator"
+}
+```
+
+#### Request Body (Minimal - without parentRole)
+```json
+{
+  "name": "coordinator",
+  "org_id": "bripen"
 }
 ```
 
@@ -477,13 +596,154 @@ Authorization: Bearer YOUR_TOKEN (required)
 ```json
 {
   "success": true,
-  "message": "Role and permissions created successfully",
-  "roleId": "coordinator",
-  "permissionId": "coordinator"
+  "message": "Role created successfully",
+  "data": {
+    "roleId": "coordinator",
+    "collection": "roles"
+  }
 }
 ```
 
-### 2. Get Parent Role (GET)
+#### Expected Response (Error - 400)
+```json
+{
+  "success": false,
+  "message": "Role name and org_id are required",
+  "required_fields": {
+    "name": "string - unique identifier for the role",
+    "org_id": "string - organization ID",
+    "parentRole": "string (optional) - parent role name"
+  }
+}
+```
+
+#### Expected Response (Error - 400 - Role Exists)
+```json
+{
+  "success": false,
+  "message": "Failed to create role",
+  "error": "Role with this name already exists"
+}
+```
+
+---
+
+### 2. Create Permissions for Role (POST)
+
+#### Endpoint
+```
+POST /api/permissions
+```
+
+#### Headers
+```
+Content-Type: application/json
+Authorization: Bearer YOUR_TOKEN (optional - currently disabled)
+```
+
+#### Description
+Creates a permissions document in the Permissions collection with all the boolean permission values, and updates the role document to have a `permission_set` field that is a Firestore document reference to the Permissions document. The role must already exist before creating permissions. Token checking is currently disabled.
+
+#### Request Body
+```json
+{
+  "roleName": "coordinator",
+  "create_clients": true,
+  "read_clients": true,
+  "update_clients": true,
+  "delete_clients": false,
+  "create_org": false,
+  "read_org": true,
+  "update_org": false,
+  "delete_org": false,
+  "create_rides": true,
+  "read_rides": true,
+  "update_rides": true,
+  "delete_rides": false,
+  "create_roles": true,
+  "read_roles": true,
+  "update_roles": true,
+  "delete_roles": false,
+  "create_volunteers": false,
+  "read_volunteers": true,
+  "update_volunteers": false,
+  "delete_volunteers": false,
+  "read_logs": true
+}
+```
+
+#### Expected Response (Success - 201)
+```json
+{
+  "success": true,
+  "message": "Permission created and role updated successfully",
+  "data": {
+    "permissionId": "coordinator",
+    "roleName": "coordinator",
+    "roleCollection": "roles"
+  }
+}
+```
+
+#### Expected Response (Error - 400)
+```json
+{
+  "success": false,
+  "message": "Role name is required",
+  "required_fields": {
+    "roleName": "string - name of the role to attach permissions to",
+    "create_clients": "boolean (optional)",
+    "read_clients": "boolean (optional)",
+    "update_clients": "boolean (optional)",
+    "delete_clients": "boolean (optional)",
+    "create_org": "boolean (optional)",
+    "read_org": "boolean (optional)",
+    "update_org": "boolean (optional)",
+    "delete_org": "boolean (optional)",
+    "create_rides": "boolean (optional)",
+    "read_rides": "boolean (optional)",
+    "update_rides": "boolean (optional)",
+    "delete_rides": "boolean (optional)",
+    "create_roles": "boolean (optional)",
+    "read_roles": "boolean (optional)",
+    "update_roles": "boolean (optional)",
+    "delete_roles": "boolean (optional)",
+    "create_volunteers": "boolean (optional)",
+    "read_volunteers": "boolean (optional)",
+    "update_volunteers": "boolean (optional)",
+    "delete_volunteers": "boolean (optional)",
+    "read_logs": "boolean (optional)"
+  }
+}
+```
+
+#### Expected Response (Error - 400 - Role Not Found)
+```json
+{
+  "success": false,
+  "message": "Failed to create permission and update role",
+  "error": "Permission created but role not found to update. Role may need to be created first."
+}
+```
+
+#### Expected Response (Error - 400 - Permission Exists)
+```json
+{
+  "success": false,
+  "message": "Failed to create permission and update role",
+  "error": "Permission with this name already exists"
+}
+```
+
+#### Notes
+- The `roleName` must match an existing role document name
+- All permission fields are optional boolean values (defaults to `false` if not provided)
+- The `permission_set` field in the role document will be a Firestore DocumentReference pointing to the Permissions document
+- Permissions are stored in the `Permissions` collection (capital P)
+
+---
+
+### 3. Get Parent Role (GET)
 
 #### Endpoint
 ```
@@ -512,7 +772,7 @@ Authorization: Bearer YOUR_TOKEN (optional)
 }
 ```
 
-### 3. Get Parent Role View (GET)
+### 4. Get Parent Role View (GET)
 
 #### Endpoint
 ```
@@ -1735,6 +1995,51 @@ Authorization: Bearer {{auth_token}}
 ```
 GET http://localhost:3000/api/rides/{{test_ride_id}}/match-drivers
 Authorization: Bearer {{auth_token}}
+```
+
+### Create Role
+```json
+POST http://localhost:3000/api/roles
+Content-Type: application/json
+Authorization: Bearer {{auth_token}}
+
+{
+  "name": "coordinator",
+  "org_id": "bripen",
+  "parentRole": "default_coordinator"
+}
+```
+
+### Create Permissions for Role
+```json
+POST http://localhost:3000/api/permissions
+Content-Type: application/json
+Authorization: Bearer {{auth_token}}
+
+{
+  "roleName": "coordinator",
+  "create_clients": true,
+  "read_clients": true,
+  "update_clients": true,
+  "delete_clients": false,
+  "create_org": false,
+  "read_org": true,
+  "update_org": false,
+  "delete_org": false,
+  "create_rides": true,
+  "read_rides": true,
+  "update_rides": true,
+  "delete_rides": false,
+  "create_roles": true,
+  "read_roles": true,
+  "update_roles": true,
+  "delete_roles": false,
+  "create_volunteers": false,
+  "read_volunteers": true,
+  "update_volunteers": false,
+  "delete_volunteers": false,
+  "read_logs": true
+}
 ```
 
 ### Get Parent Role View
