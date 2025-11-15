@@ -6,32 +6,31 @@ const admin = require("firebase-admin");
 const db = admin.firestore();
 
 /**
- * POST /api/reports/save
+ * POST /api/reports
  */
-router.post("/save", async (req, res) => {
+router.post("/", async (req, res) => {
   try {
-    const { user_id, selectedParams } = req.body;
+    const { selectedParams, collection } = req.body;
 
-    if (!user_id || !selectedParams) {
+    if (!selectedParams || !collection) {
       return res.status(400).json({
         success: false,
-        message: "Missing user_id or selectedParams",
+        message: "Missing selectedParams or collection",
       });
     }
 
-    const docRef = await db.collection("savedReports").add({
-      user_id,
+    await db.collection("savedReports").add({
       selectedParams,
+      collection,
       timestamp: new Date(),
     });
 
-    return res.status(200).json({
+    return res.json({
       success: true,
-      message: "Saved successfully",
-      document_id: docRef.id,
+      message: "Report saved successfully",
     });
-  } catch (err) {
-    console.error("Error saving report:", err);
+  } catch (error) {
+    console.error("POST /reports error:", error);
     return res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -40,71 +39,46 @@ router.post("/save", async (req, res) => {
 });
 
 /**
- * GET /api/reports/:user_id
+ * GET /api/reports
  */
-router.get("/:user_id", async (req, res) => {
+router.get("/", async (req, res) => {
   try {
-    const user_id = req.params.user_id;
+    const { selectedParams, collection } = req.query;
 
-    // Get saved filters
-    const savedSnapshot = await db
-      .collection("savedReports")
-      .where("user_id", "==", user_id)
-      .limit(1)
-      .get();
-
-    if (savedSnapshot.empty) {
-      return res.status(200).json({
-        success: true,
-        filters_used: [],
-        reports: {},
-        message: "No saved report filters found",
+    if (!selectedParams || !collection) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing selectedParams or collection",
       });
     }
 
-    const savedData = savedSnapshot.docs[0].data();
-    const filters = savedData.selectedParams;
+    const paramsArray = selectedParams.split(",");
 
-    // Check collections
-    const collections = ["clients", "rides", "volunteers"];
-    let foundCollection = null;
-    let docData = null;
+    const snapshot = await db.collection(collection).get();
+    const results = [];
 
-    for (const col of collections) {
-      const docSnap = await db.collection(col).doc(user_id).get();
-      if (docSnap.exists) {
-        foundCollection = col;
-        docData = docSnap.data();
-        break;
-      }
-    }
+    snapshot.forEach((doc) => {
+      const data = doc.data();
+      const filtered = {};
 
-    if (!foundCollection) {
-      return res.status(200).json({
-        success: true,
-        filters_used: filters,
-        reports: {},
-        message: "No matching doc found",
+      paramsArray.forEach((field) => {
+        if (data[field] !== undefined) {
+          filtered[field] = data[field];
+        }
       });
-    }
 
-    // Return only selected fields
-    let reportData = {};
-    filters.forEach((field) => {
-      if (docData[field] !== undefined) {
-        reportData[field] = docData[field];
-      }
+      results.push({
+        doc_id: doc.id,
+        ...filtered,
+      });
     });
 
-    return res.status(200).json({
+    return res.json({
       success: true,
-      document_type: foundCollection,
-      filters_used: filters,
-      reports: reportData,
+      data: results,
     });
-
-  } catch (err) {
-    console.error("Error fetching report:", err);
+  } catch (error) {
+    console.error("GET /reports error:", error);
     return res.status(500).json({
       success: false,
       message: "Internal server error",
