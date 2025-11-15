@@ -33,6 +33,7 @@ router.get("/", async (req, res) => {
 });
 
 // ✅ POST /api/reports/save
+// ✅ POST /api/reports/save
 router.post("/save", async (req, res) => {
   try {
     console.log("🔥 POST BODY RECEIVED:", JSON.stringify(req.body, null, 2));
@@ -42,10 +43,8 @@ router.post("/save", async (req, res) => {
     // 🧠 Handle both array and string formats
     if (typeof selectedParams === "string") {
       try {
-        // If it's a valid JSON string like '["client_name","ride_status"]'
         selectedParams = JSON.parse(selectedParams);
       } catch {
-        // If it’s a comma-separated string like "client_name, ride_status"
         selectedParams = selectedParams
           .replace(/[\[\]]/g, "")
           .split(",")
@@ -53,7 +52,6 @@ router.post("/save", async (req, res) => {
       }
     }
 
-    // ✅ Validate final structure
     if (!user_id || !selectedParams || selectedParams.length === 0) {
       return res.status(400).json({
         success: false,
@@ -69,17 +67,19 @@ router.post("/save", async (req, res) => {
     }
 
     // ✅ Save to Firestore
-    const docRef = await db.collection("savedReports").add({
+    await db.collection("savedReports").add({
       user_id,
       selectedParams,
       timestamp: new Date(),
     });
 
+    // 🔥 Return ONLY user_id (not document_id)
     res.json({
       success: true,
       message: "Saved successfully",
-      document_id: docRef.id,
+      user_id: user_id,
     });
+
   } catch (error) {
     console.error("❌ Error saving report:", error);
     res.status(500).json({
@@ -89,6 +89,7 @@ router.post("/save", async (req, res) => {
     });
   }
 });
+
 
 /**
  * ✅ GET /api/reports/:user_id
