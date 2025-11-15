@@ -367,6 +367,105 @@ app.put('/api/users/:userID', async (req, res) => {
   }
 });
 
+// Password reset endpoint
+app.post('/api/users/:userID/reset-password', async (req, res) => {
+  try {
+    const auditLogger = require('./AuditLogger');
+    const { getClientIp, getUserAgent } = require('./middleware/securityMiddleware');
+    
+    // Extract the userID from URL parameters
+    const { userID } = req.params;
+    
+    // Extract authentication token (recommended for password resets)
+    let authToken = null;
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      authToken = authHeader.substring(7);
+    }
+
+    // Extract new password from request body
+    const { newPassword } = req.body;
+
+    if (!newPassword) {
+      return res.status(400).send({
+        success: false,
+        message: 'New password is required'
+      });
+    }
+
+    // Reset the user password
+    const result = await applicationLayer.resetUserPassword(userID, newPassword, authToken);
+
+    // Log the password reset attempt
+    const ipAddress = getClientIp ? getClientIp(req) : req.ip;
+    const userAgent = getUserAgent ? getUserAgent(req) : req.get('user-agent');
+    
+    if (result.success) {
+      // Log successful password reset
+      await auditLogger.logPHIModification(
+        result.userId,
+        'N/A',
+        'user',
+        'N/A',
+        'UPDATE',
+        'user',
+        result.userId,
+        ipAddress,
+        userAgent,
+        { 
+          user_ID: result.userID,
+          action: 'password_reset',
+          reset_by: authToken ? 'admin' : 'user'
+        }
+      );
+
+      res.status(200).send({
+        success: true,
+        message: result.message,
+        data: {
+          userId: result.userId,
+          userID: result.userID
+        }
+      });
+    } else {
+      // Log failed password reset attempt
+      await auditLogger.logAccess({
+        userId: 'unknown',
+        userEmail: 'unknown',
+        userRole: 'unknown',
+        organizationId: 'N/A',
+        action: 'PASSWORD_RESET',
+        resourceType: 'user',
+        resourceId: userID,
+        ipAddress: ipAddress,
+        userAgent: userAgent,
+        success: false,
+        failureReason: result.message
+      });
+
+      // Determine appropriate status code
+      let statusCode = 400;
+      if (result.message && result.message.includes('not found')) {
+        statusCode = 404; // Not Found
+      } else if (result.message && result.message.includes('Authentication failed')) {
+        statusCode = 401; // Unauthorized
+      }
+
+      res.status(statusCode).send({
+        success: false,
+        message: result.message
+      });
+    }
+  } catch (error) {
+    console.error('Error in POST /api/users/:userID/reset-password endpoint:', error);
+    res.status(500).send({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+});
+
 // User account deletion endpoint
 app.delete('/api/users/:userID', async (req, res) => {
   try {

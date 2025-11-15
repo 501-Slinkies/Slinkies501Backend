@@ -3591,12 +3591,203 @@ async function deleteOrganization(orgId, authToken) {
   }
 }
 
+async function createUserAccount(userData, authToken) {
+  try {
+    // Optional: Verify the JWT token if authToken is provided (for admin user creation)
+    if (authToken) {
+      const tokenVerification = verifyToken(authToken);
+      if (!tokenVerification.success) {
+        return { success: false, message: 'Authentication failed' };
+      }
+    }
+
+    // Hash password if provided
+    if (userData.password) {
+      const { hashPassword } = require('./utils/encryption');
+      userData.password = hashPassword(userData.password);
+    }
+
+    // Create the user account
+    const result = await dataAccess.createUser(userData);
+
+    if (result.success) {
+      // Get the created user to return userID
+      const userResult = await dataAccess.getUserById(result.userId);
+      return {
+        success: true,
+        userId: result.userId,
+        userID: userResult.success ? userResult.user.user_ID : null,
+        message: result.message
+      };
+    }
+
+    return result;
+  } catch (error) {
+    console.error('Error in createUserAccount:', error);
+    return {
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    };
+  }
+}
+
+async function updateUserAccount(userID, updateData, authToken) {
+  try {
+    // Optional: Verify the JWT token if authToken is provided
+    if (authToken) {
+      const tokenVerification = verifyToken(authToken);
+      if (!tokenVerification.success) {
+        return { success: false, message: 'Authentication failed' };
+      }
+    }
+
+    // Prevent password updates - passwords must be reset via resetPassword function
+    if (updateData.password !== undefined) {
+      return { 
+        success: false, 
+        message: 'Password cannot be updated through this endpoint. Use the password reset endpoint instead.' 
+      };
+    }
+
+    // Get user by user_ID first
+    const userResult = await dataAccess.getUserByUserID(userID);
+    if (!userResult.success) {
+      return {
+        success: false,
+        message: userResult.error || 'User not found'
+      };
+    }
+
+    const userId = userResult.user.id;
+
+    // Update the user account
+    const result = await dataAccess.updateUser(userId, updateData);
+
+    if (result.success) {
+      // Get the updated user
+      const updatedUserResult = await dataAccess.getUserById(userId);
+      return {
+        success: true,
+        userId: userId,
+        userID: userID,
+        user: updatedUserResult.success ? updatedUserResult.user : null,
+        message: result.message
+      };
+    }
+
+    return result;
+  } catch (error) {
+    console.error('Error in updateUserAccount:', error);
+    return {
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    };
+  }
+}
+
+async function deleteUserAccount(userID, authToken) {
+  try {
+    // Optional: Verify the JWT token if authToken is provided
+    if (authToken) {
+      const tokenVerification = verifyToken(authToken);
+      if (!tokenVerification.success) {
+        return { success: false, message: 'Authentication failed' };
+      }
+    }
+
+    // Get user by user_ID first
+    const userResult = await dataAccess.getUserByUserID(userID);
+    if (!userResult.success) {
+      return {
+        success: false,
+        message: userResult.error || 'User not found'
+      };
+    }
+
+    const userId = userResult.user.id;
+    const deletedUser = userResult.user;
+
+    // Delete the user account
+    const result = await dataAccess.deleteUser(userId);
+
+    if (result.success) {
+      return {
+        success: true,
+        userId: userId,
+        userID: userID,
+        deletedUser: deletedUser,
+        message: result.message
+      };
+    }
+
+    return result;
+  } catch (error) {
+    console.error('Error in deleteUserAccount:', error);
+    return {
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    };
+  }
+}
+
+async function resetUserPassword(userID, newPassword, authToken) {
+  try {
+    // Optional: Verify the JWT token if authToken is provided (recommended for password resets)
+    if (authToken) {
+      const tokenVerification = verifyToken(authToken);
+      if (!tokenVerification.success) {
+        return { success: false, message: 'Authentication failed' };
+      }
+    }
+
+    if (!newPassword || typeof newPassword !== 'string' || newPassword.trim().length === 0) {
+      return {
+        success: false,
+        message: 'New password is required and must be a non-empty string'
+      };
+    }
+
+    // Try to reset password by document ID first (in case userID is a Firestore document ID)
+    let result = await dataAccess.resetPassword(userID, newPassword);
+    
+    // If that fails, try to reset by user_ID field
+    if (!result.success) {
+      result = await dataAccess.resetPasswordByUserID(userID, newPassword);
+    }
+
+    if (result.success) {
+      return {
+        success: true,
+        userId: result.userId,
+        userID: result.userID || userID,
+        message: result.message
+      };
+    }
+
+    return result;
+  } catch (error) {
+    console.error('Error in resetUserPassword:', error);
+    return {
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    };
+  }
+}
+
 module.exports = { 
   loginUser, 
   createRoleWithPermissions, 
   getParentRole,
   getParentRoleView,
   verifyToken, 
+  createUserAccount,
+  updateUserAccount,
+  deleteUserAccount,
+  resetUserPassword,
   createRide,
   matchDriversForRide,
   getDriverRides,
