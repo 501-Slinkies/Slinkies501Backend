@@ -1115,18 +1115,25 @@ app.get("/api/maps/route", async (req, res) => {
 // ================================
 
 // Send notification to a user by ID, Body: { "userId": "abc123", "message": "Your ride is confirmed", "type": "sms" }
-app.post("/api/notify", async (req, res) => {
-  const { userId, message, type } = req.body;
+app.post("/api/notify-org", async (req, res) => {
+  const { org_id } = req.body;
 
-  if (!userId || !message || !type) {
-    return res.status(400).json({ success: false, message: "Missing userId, message, or type" });
+  if (!org_id) {
+      return res.status(400).json({ success: false, message: "Missing org_id" });
   }
 
-  const result = await sendNotification(userId, message, type);
-  if (result.success) {
-    res.json({ success: true });
-  } else {
-    res.status(500).json(result);
+  try {
+      const { notifyDriversForOrganization } = require("./services/notifications");
+      const result = await notifyDriversForOrganization(org_id);
+
+      if (result.success) {
+          return res.json(result);
+      } else {
+          return res.status(500).json(result);
+      }
+  } catch (error) {
+      console.error("notify-org endpoint error:", error);
+      return res.status(500).json({ success: false, message: error.message });
   }
 });
 
