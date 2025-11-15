@@ -10,6 +10,11 @@ const { admin, db } = require('./firebase');
 // createAddress function used to create destination documents
 const DAL = require('./DataAccessLayer.js');
 
+// --- Global Lookup Maps ---
+// We will populate these as we create clients and volunteers
+const clientLookup = new Map();
+const volunteerLookup = new Map();
+
 // --- Utility Functions ---
 
 function findKey(row, target) {
@@ -34,6 +39,44 @@ function parseTripType(tripTypeStr) {
     if (!tripTypeStr) return "OneWay";
     const normalized = tripTypeStr.toLowerCase().replace(/\s+/g, '');
     return normalized === 'roundtrip' ? 'RoundTrip' : 'OneWay';
+}
+
+/**
+ * Parses a message string to determine the call type.
+ * @param {string} message The raw message text.
+ * @returns {string} The categorized call type.
+ */
+function parseCallType(message) {
+    if (!message) return 'Unknown';
+    const msg = message.toLowerCase();
+
+    // Check for specific categories first
+    if (msg.includes('enroll') || msg.includes('sign up') || msg.includes('new client')) {
+        return 'Client Enrollment';
+    }
+    if (msg.includes('change') || msg.includes('cancel') || msg.includes('reschedule')) {
+        return 'Ride Change/Cancellation';
+    }
+    if (msg.includes('donat')) { // Catches 'donate', 'donation'
+        return 'Donation';
+    }
+    if (msg.includes('volunteer') || msg.includes('drive for you') || msg.includes('new driver')) {
+        return 'Driver Interest';
+    }
+    if (msg.includes('driver') && msg.includes('question')) {
+        return 'Driver Question';
+    }
+    if (msg.includes('concern') || msg.includes('complaint') || msg.includes('problem')) {
+        return 'Client Concern';
+    }
+    
+    // Check for broad ride requests last
+    if (msg.includes('ride') || msg.includes('appt') || msg.includes('appointment')) {
+        return 'Ride Request';
+    }
+    
+    // Default fallback
+    return 'Unknown';
 }
 
 /**
@@ -63,18 +106,17 @@ async function createAddress(addressData) {
     }
 
     const newAddress = {
-      destination_id: "",
-            // normalize organization -> organization_id (FK to Organizations.org_id)
-            organization_id: addressData.organization_id || addressData.organization || "",
-      nickname: addressData.nickname || "",
-      street_address,
-      address_2: addressData.address_2 || "",
-      city,
-      state: addressData.state || "",
-      zip: addressData.zip || "",
-      town: addressData.town || city || "",
-      entered_by: addressData.entered_by || "System",
-      date_created: new Date().toISOString(),
+        destination_id: "",
+        organization: addressData.organization_id || addressData.organization || "",
+        nickname: addressData.nickname || "",
+        street_address,
+        address_2: addressData.address_2 || "",
+        city,
+        state: addressData.state || "",
+        zip: addressData.zip || "",
+        town: addressData.town || city || "",
+        entered_by: addressData.entered_by || "System",
+        date_created: new Date().toISOString(),
     };
 
     const docRef = db.collection("destination").doc();
@@ -137,21 +179,27 @@ async function migrateClients(filePath) {
     let batch = DAL.createBatch();
     let ops = 0;
 
+    console.log("Migrating clients and building lookup map...");
+
     for (const row of rows) {
         if (count++ >= limit) break;
 
+        const firstName = row[findKey(row, "FIRST NAME")]?.trim() || '';
+        const lastName = row[findKey(row, "LAST NAME")]?.trim() || '';
+
         const clientData = {
             client_id: '',
-            organization_id: '',
+            organization: row[findKey(row, 'ORGANIZATION')]?.trim() || '',
             street_address: row[findKey(row, "STREET ADDRESS")]?.trim() || '',
             address2: row[findKey(row, "ADDRESS 2")]?.trim() || '',
-            first_name: row[findKey(row, "FIRST NAME")]?.trim() || '',
-            last_name: row[findKey(row, "LAST NAME")]?.trim() || '',
+            first_name: firstName,
+            last_name: lastName,
             city: row[findKey(row, "CITY")]?.trim() || '',
             state: row[findKey(row, "STATE")]?.trim() || '',
             zip: row[findKey(row, "ZIP")]?.trim() || row[findKey(row, "ZIP ")]?.trim() || '',
             month_and_year_of_birth: row[findKey(row, "MONTH & YEAR OF BIRTH")]?.trim() || '',
             type_of_residence: row[findKey(row, "TYPE OF RESIDENCE")]?.trim() || '',
+            email: row[findKey(row, "EMAIL")]?.trim() || '',
             email_address: row[findKey(row, "EMAIL ADDRESS")]?.trim() || '',
             primary_phone: row[findKey(row, "PRIMARY PHONE")]?.trim() || '',
             primary_iscell: row[findKey(row, "Primary isCell")]?.trim().toUpperCase() === 'Y',
@@ -168,7 +216,9 @@ async function migrateClients(filePath) {
             mobility_assistance: row[findKey(row, "MOBILITY ASSISTANCE")]?.trim() || '',
             other_limitations: row[findKey(row, "OTHER LIMITATIONS")]?.trim() || '',
             car_height_needed: row[findKey(row, "CAR HEIGHT NEEDED")]?.trim() || '',
-            service_animal: row[findKey(row, "SERVICE ANIMAL")]?.trim().toUpperCase() === 'N',
+            service_animal: row[findKey(row, "SERVICE ANIMAL")]?.trim().toUpperCase() === 'Y',
+            service_animal_breed: row[findKey(row, "BREED")]?.trim() || '',
+            service_animal_size: row[findKey(row, "SIZE")]?.trim() || '',
             service_animal_notes: row[findKey(row, "SERVICE ANIMAL NOTES")]?.trim() || '',
             pick_up_instructions: row[findKey(row, "PICK UP INSTRUCTIONS")]?.trim() || '',
             live_alone: row[findKey(row, "LIVE ALONE")]?.trim().toUpperCase() === 'Y',
@@ -177,16 +227,22 @@ async function migrateClients(filePath) {
             date_enrolled: row[findKey(row, "Date Enrolled ")]?.trim() || '',
             client_status: row[findKey(row, "CLIENT STATUS")]?.trim() || 'active',
             temp_date: row[findKey(row, "temp date")]?.trim() || '',
-            internal_comments: row[findKey(row, "COMMENTS")]?.trim() || '',
+            comments: row[findKey(row, "COMMENTS")]?.trim() || '',
             external_comments: '',
         };
 
         try {
             const docRef = db.collection('clients').doc();
             clientData.client_id = docRef.id;
-            // If CSV included an organization column, try to map it to organization_id
-            clientData.organization_id = row[findKey(row, 'ORGANIZATION')]?.trim() || clientData.organization_id || '';
+            
             DAL.setBatchDoc(batch, 'clients', docRef.id, clientData, { merge: false });
+
+            // --- Build the Lookup Map ---
+            if (firstName && lastName) {
+                const key = (firstName + lastName).toUpperCase().replace(/\s/g, '');
+                clientLookup.set(key, docRef.id);
+            }
+
             ops++;
             if (ops >= BATCH_LIMIT) {
                 await DAL.commitBatch(batch);
@@ -199,7 +255,7 @@ async function migrateClients(filePath) {
     }
 
     if (ops > 0) await DAL.commitBatch(batch);
-    console.log(`Client migration finished. Processed ${count} rows.`);
+    console.log(`Client migration finished. Processed ${count} rows. Lookup map size: ${clientLookup.size}`);
 }
 
 async function migrateVolunteers(filePath) {
@@ -211,28 +267,34 @@ async function migrateVolunteers(filePath) {
     let batch = DAL.createBatch();
     let ops = 0;
 
+    console.log("Migrating volunteers and building lookup map...");
+
     for (const row of rows) {
         if (count++ >= limit) break;
 
+        const firstName = row[findKey(row, "FIRST NAME")]?.trim() || '';
+        const lastName = row[findKey(row, "LAST NAME")]?.trim() || '';
+
         const volunteerData = {
-            volunteer_id: '',
-            organization_id: '',
-            first_name: row[findKey(row, "FIRST NAME")]?.trim() || '',
-            last_name: row[findKey(row, "LAST NAME")]?.trim() || '',
+            uid: '', // Will be set below
+            organization: row[findKey(row, 'ORGANIZATION')]?.trim() || '',
+            first_name: firstName,
+            last_name: lastName,
             password: row[findKey(row, "PASSWORD")]?.trim() || 'defaultPassword',
             birth_month_year: row[findKey(row, "MONTH & YEAR OF BIRTH")]?.trim() || '',
             street_address: row[findKey(row, "STREET ADDRESS")]?.trim() || '',
             address2: row[findKey(row, "ADDRESS 2")]?.trim() || '',
             city: row[findKey(row, "CITY")]?.trim() || '',
             state: row[findKey(row, "STATE")]?.trim() || '',
+            zip: parseInt(row[findKey(row, "ZIP")]) || 0,
             volunteering_status: row[findKey(row, "VOLUNTEERING STATUS")]?.trim() || 'active',
-            roles: (row[findKey(row, "VOLUNTEER POSITION")]?.split(';').map(r => r.trim()).filter(Boolean)) || ['driver'],
+            role: (row[findKey(row, "VOLUNTEER POSITION")]?.split(';').map(r => r.trim()).filter(Boolean)) || ['driver'],
             email_address: row[findKey(row, "EMAIL ADDRESS")]?.trim() || '',
             primary_phone: row[findKey(row, "PRIMARY PHONE")]?.trim() || '',
-            primary_is_cell: row[findKey(row, "primary isCell")]?.trim().toUpperCase() === 'Y',
+            primary_iscell: row[findKey(row, "primary isCell")]?.trim().toUpperCase() === 'Y',
             primary_text: row[findKey(row, "primary can text")]?.trim().toUpperCase() === 'Y',
             secondary_phone: row[findKey(row, "SECONDARY PHONE")]?.trim() || '',
-            secondary_is_cell: row[findKey(row, "secondary isCell")]?.trim().toUpperCase() === 'Y',
+            secondary_iscell: row[findKey(row, "secondary isCell")]?.trim().toUpperCase() === 'Y',
             secondary_text: row[findKey(row, "secondary canText")]?.trim().toUpperCase() === 'Y',
             contact_type_preference: row[findKey(row, "CONTACT TYPE PREFERENCE")]?.trim() || 'phone',
             emergency_contact_name: row[findKey(row, "EMERGENCY CONTACT NAME")]?.trim() || '',
@@ -256,17 +318,27 @@ async function migrateVolunteers(filePath) {
             when_trained_by_lifespan: row[findKey(row, "WHEN TRAINED BY LIFESPAN")]?.trim() || '',
             when_oriented_position: row[findKey(row, "WHEN ORIENTED TO POSITION")]?.trim() || '',
             date_began_volunteering: row[findKey(row, "DATE BEGAN VOLUNTEERING")]?.trim() || '',
-            data1_fromdate: row[findKey(row, "Data1_fromDate")]?.trim() || '',
-            data2_toDate: row[findKey(row, "Data2_toDate")]?.trim() || '',
             comments: row[findKey(row, "COMMENTS")]?.trim() || '',
+            
+            created_time: admin.firestore.Timestamp.now(),
+            phone_number: row[findKey(row, "PRIMARY PHONE")]?.trim() || '',
+            accepts_serice_animals: false,
+            service_animal_notes: '',
+            oxygen: false,
+            photo_url: '',
         };
 
         try {
             const docRef = db.collection('volunteers').doc();
-            volunteerData.volunteer_id = docRef.id;
-            // Map CSV organization field to standardized organization_id
-            volunteerData.organization_id = row[findKey(row, 'ORGANIZATION')]?.trim() || volunteerData.organization_id || '';
+            volunteerData.uid = docRef.id;
             DAL.setBatchDoc(batch, 'volunteers', docRef.id, volunteerData, { merge: false });
+
+            // --- Build the Lookup Map ---
+            if (firstName && lastName) {
+                const key = (firstName + lastName).toUpperCase().replace(/\s/g, '');
+                volunteerLookup.set(key, docRef.id);
+            }
+
             ops++;
             if (ops >= BATCH_LIMIT) {
                 await DAL.commitBatch(batch);
@@ -279,57 +351,47 @@ async function migrateVolunteers(filePath) {
     }
 
     if (ops > 0) await DAL.commitBatch(batch);
-    console.log(`Volunteer migration finished. Processed ${count} rows.`);
+    console.log(`Volunteer migration finished. Processed ${count} rows. Lookup map size: ${volunteerLookup.size}`);
 }
 
 async function migrateCallData(filePath) {
     const rows = await loadCSV(filePath);
     let limit = migrateCallData.limit ?? rows.length;
     let count = 0;
-    // Prepare a batch for rides
-    let batch = DAL.createBatch();
-    let ops = 0;
-    const BATCH_LIMIT = 400;
-    for (const row of rows) {
-        if (count++ >= limit) break;
+    
+    let rideBatch = DAL.createBatch();
+    let rideOps = 0;
+    let callLogBatch = DAL.createBatch();
+    let callLogOps = 0;
+    const BATCH_LIMIT = 400; // Batch limit for each
 
-        const isRideRequest = row[findKey(row, 'isRideRequest')]?.toUpperCase() === 'TRUE';
-        if (!isRideRequest) {
-            console.log(`Skipping row ${count} as it's not a ride request.`);
-            continue;
-        }
-
+    // This helper function creates a ride
+    async function createRideEntry(row, firestoreClientId) {
         try {
             // Step 1: Create or find the destination
             const addressData = {
                 nickname: row[findKey(row, 'NAME OF DESTINATION/PRACTICE/BUILDING')] || "",
                 street_address: row[findKey(row, 'DESTINATION STREET ADDRESS')] || "",
-                address_2: row[findKey(row, 'DESTINATION ADDRESS 2')] || "",
+                address2: row[findKey(row, 'DESTINATION ADDRESS 2')] || "", // 'address2' matches schema
                 city: row[findKey(row, 'CITY')] || "",
                 state: row[findKey(row, 'STATE')] || "",
                 zip: row[findKey(row, 'ZIP')] || "",
                 town: row[findKey(row, 'TOWN')] || row[findKey(row, 'CITY')] || "",
+                entered_by: "System", // Matches schema
             };
 
             if (!addressData.street_address || !addressData.city) {
                 console.warn(`Skipping ride in row ${count}: Missing essential address details.`);
-                continue;
+                return;
             }
             const addressRef = await createOrFindAddress(addressData);
 
-            // Step 2: Create the Ride document
-            const clientId = row[findKey(row, 'Client ID')];
-            if (!clientId) {
-                console.warn(`Skipping ride in row ${count}: Missing Client ID.`);
-                continue;
-            }
-
-            // Normalize and validate date/time fields. We require a parseable ride Date.
+            // Step 2: Normalize and validate date/time
             const rawRideDate = row[findKey(row, 'DATE OF RIDE')]?.trim() || '';
             const parsedRideDate = parseDateTime(rawRideDate);
             if (!parsedRideDate) {
                 console.warn(`Skipping ride in row ${count}: Missing or unparseable 'DATE OF RIDE' (${rawRideDate}).`);
-                continue;
+                return;
             }
 
             const rawAppointmentTime = row[findKey(row, 'APPOINTMENT TIME')]?.trim() || '';
@@ -338,83 +400,125 @@ async function migrateCallData(filePath) {
             const parsedConfirmation1 = parseDateTime(row[findKey(row, 'CONFIRMATION1_DATE')]?.trim() || row[findKey(row, 'CONFIRMATION 1 DATE')]?.trim() || '');
             const parsedConfirmation2 = parseDateTime(row[findKey(row, 'CONFIRMATION2_DATE')]?.trim() || row[findKey(row, 'CONFIRMATION 2 DATE')]?.trim() || '');
 
-            const confirmation1_By = row[findKey(row, 'CONFIRMATION1_BY')] || row[findKey(row, 'CONFIRMATION 1 BY')] || '';
-            const confirmation2_By = row[findKey(row, 'CONFIRMATION2_BY')] || row[findKey(row, 'CONFIRMATION 2 BY')] || '';
-
-            // Map required ride fields first; optional date fields will be set only when parsed
+            // --- Schema Alignment (matches rides.png) ---
             const rideData = {
-                ride_id: '', // Will be set by createRide
-                organization_id: '',
-                clientUID: clientId, // Pass as string, let createRide handle doc ref if needed
-                UID: '', // Will be set by createRide
-                additionalClient1_name: '',
-                additionalClient1_rel: '',
-                driverUID: '', 
-                dispatcherUID: '', 
-                startLocation: '', 
-                destinationUID: '', // Will be set below
-                Date: parsedRideDate,
-                appointment_type: row[findKey(row, 'PURPOSE OF TRIP')] || '', // No direct mapping, use purpose
-                pickupTme: row[findKey(row, 'PICK UP TIME')] || '',
-                estimatedDuration: parseDuration(row[findKey(row, 'ESTIMATED LENGTH OF APPOINTMENT')]),
+                UID: '', // Will be set below
+                clientUID: firestoreClientId, // --- THIS IS THE KEY ---
+                driverUID: '', // Per your request, set to '' (Not Assigned)
+                dispatcherUID: '', // Per your request, set to '' (Not Assigned)
+                destinationUID: addressRef.id || '',
+                date: parsedRideDate,
+                createdAt: admin.firestore.Timestamp.now(), // MATCHES SCHEMA
+                updatedAt: admin.firestore.Timestamp.now(), // MATCHES SCHEMA
+                status: 'Unassigned', // Per your request
+                additionalClient1_Name: '', // MATCHES SCHEMA
+                additionalClient1_Rel: '', // MATCHES SCHEMA
+                appointmentTime: parsedAppointmentTime || DEFAULT_TIMESTAMP, // MATCHES SCHEMA
+                pickupTime: row[findKey(row, 'PICK UP TIME')] || '', // MATCHES SCHEMA (fixed typo)
+                estimatedDuration: parseDuration(row[findKey(row, 'ESTIMATED LENGTH OF APPOINTMENT')]) || 0, // MATCHES SCHEMA (Integer)
                 purpose: row[findKey(row, 'PURPOSE OF TRIP')] || '',
                 tripType: parseTripType(row[findKey(row, 'ROUND TRIP OR ONE WAY')]),
-                status: 'Unassigned',
                 wheelchair: parseWheelchair(row[findKey(row, 'WHEELCHAIR')]),
-                wheelchairType: '', 
+                wheelchairType: '', // MATCHES SCHEMA
                 milesDriven: 0,
-                volunteerHours: 0, 
-                donationReceived: 'None', 
-                donationAmount: 0, 
-                confirmation1_By: confirmation1_By || '',
-                confirmation2_By: confirmation2_By || '',
+                volunteerHours: 0,
+                donationRecieved: 'None', // MATCHES SCHEMA (with 'ei' typo)
+                donationAmount: 0,
+                confirmation1_Date: parsedConfirmation1 || DEFAULT_TIMESTAMP, // MATCHES SCHEMA
+                confirmation1_By: row[findKey(row, 'CONFIRMATION1_BY')] || row[findKey(row, 'CONFIRMATION 1 BY')] || '',
+                confirmation2_Date: parsedConfirmation2 || DEFAULT_TIMESTAMP, // MATCHES SCHEMA
+                confirmation2_By: row[findKey(row, 'CONFIRMATION2_BY')] || row[findKey(row, 'CONFIRMATION 2 BY')] || '',
                 internalComment: '',
                 externalComment: row[findKey(row, 'COMMENTS ABOUT RIDE')] || '',
-                incidentReport: '',
-                CreatedAt: new Date().toISOString(),
-                UpdatedAt: new Date().toISOString(),
+                startLocation: '', // MATCHES SCHEMA
+                endLocation: '', // MATCHES SCHEMA
             };
 
-                // Map CSV organization field to standardized organization_id for rides
-                rideData.organization_id = row[findKey(row, 'ORGANIZATION')]?.trim() || rideData.organization_id || '';
-
-            // Always set appointmentTime and confirmation dates — use DEFAULT_TIMESTAMP when missing
-            rideData.appointmentTime = parsedAppointmentTime || DEFAULT_TIMESTAMP;
-            rideData.confirmation1_Date = parsedConfirmation1 || DEFAULT_TIMESTAMP;
-            rideData.confirmation2_Date = parsedConfirmation2 || DEFAULT_TIMESTAMP;
-
-            // Set destinationUID as string (let createRide handle doc ref if needed)
-            if (addressRef && addressRef.id) {
-                rideData.destinationUID = addressRef.id;
-            }
-
-            // Use DataAccessLayer batch to write rides
             const docRef = db.collection('rides').doc();
-            rideData.ride_id = docRef.id;
             rideData.UID = docRef.id;
-            DAL.setBatchDoc(batch, 'rides', docRef.id, rideData, { merge: false });
-            ops++;
-            if (ops >= BATCH_LIMIT) {
-                await DAL.commitBatch(batch);
-                batch = DAL.createBatch();
-                ops = 0;
+            
+            DAL.setBatchDoc(rideBatch, 'rides', docRef.id, rideData, { merge: false });
+            rideOps++;
+            if (rideOps >= BATCH_LIMIT) {
+                await DAL.commitBatch(rideBatch);
+                rideBatch = DAL.createBatch();
+                rideOps = 0;
             }
-
         } catch (error) {
-            console.error(`Failed to migrate call data row ${count}: ${error.message}`, row);
+            console.error(`Failed to create RIDE from row ${count}: ${error.message}`, row);
         }
     }
-    if (ops > 0) await DAL.commitBatch(batch);
+
+
+    async function createCallLogEntry(row, firestoreClientId) {
+        try {
+            const message = row[findKey(row, "MESSAGE")]?.trim() || '';
+            const callType = parseCallType(message);
+
+
+            const callLogData = {
+                first_name: row[findKey(row, "FIRST NAME")]?.trim() || '',
+                last_name: row[findKey(row, "LAST NAME")]?.trim() || '',
+                phone_number: row[findKey(row, "PHONE NUMBER")]?.trim() || '',
+                message: message, // Save the full message
+                date_of_call: row[findKey(row, "DATE OF RIDE")]?.trim() || '', // Using "DATE OF RIDE" as proxy
+                call_type: callType,
+                entered_by: 'System', // Default
+                forwarded_to_name_and_date: row[findKey(row, "MESSAGE FORWARDED TO NAME AND DATE")]?.trim() || '',
+                isRide: false,
+                ride_reference: '', // No ride to reference
+                client_reference: firestoreClientId,
+            };
+
+            const docRef = db.collection('calllogs').doc();
+            DAL.setBatchDoc(callLogBatch, 'calllogs', docRef.id, callLogData, { merge: false });
+            callLogOps++;
+            if (callLogOps >= BATCH_LIMIT) {
+                await DAL.commitBatch(callLogBatch);
+                callLogBatch = DAL.createBatch();
+                callLogOps = 0;
+            }
+        } catch (error) {
+            console.error(`Failed to create CALLLOG from row ${count}: ${error.message}`, row);
+        }
+    }
+
+    // --- Main Migration Loop for Calls ---
+    console.log("Starting call data migration...");
+    for (const row of rows) {
+        if (count++ >= limit) break;
+
+        const isRideRequest = row[findKey(row, 'isRideRequest')]?.toUpperCase() === 'TRUE';
+
+        // Find the matching client Firestore ID
+        const firstName = row[findKey(row, "FIRST NAME")]?.trim() || '';
+        const lastName = row[findKey(row, "LAST NAME")]?.trim() || '';
+        const clientKey = (firstName + lastName).toUpperCase().replace(/\s/g, '');
+        const firestoreClientId = clientLookup.get(clientKey);
+
+        if (!firestoreClientId) {
+            console.warn(`Skipping call log row ${count}: Could not find matching client for "${firstName} ${lastName}"`);
+            continue;
+        }
+
+        if (isRideRequest) {
+            await createRideEntry(row, firestoreClientId);
+        } else {
+            await createCallLogEntry(row, firestoreClientId);
+        }
+    }
+
+    if (rideOps > 0) await DAL.commitBatch(rideBatch);
+    if (callLogOps > 0) await DAL.commitBatch(callLogBatch);
     console.log(`Call data migration finished. Processed ${count} rows.`);
 }
 
 // --- Main Execution ---
-
 (async () => {
     // Set optional limits for testing, or comment out to process all rows.
-    migrateClients.limit = 5;
-    migrateVolunteers.limit = 5;
-    migrateCallData.limit = 15;
+    //migrateClients.limit = 5;
+    //migrateVolunteers.limit = 5;
+    //migrateCallData.limit = 15;
 
     console.log("Starting client migration...");
     await migrateClients("./fakeClients.csv");
