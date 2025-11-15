@@ -1140,6 +1140,64 @@ app.get('/api/drivers/:driverID/rides', async (req, res) => {
   }
 });
 
+// Get unassigned rides for an organization and volunteer
+// Returns all rides where:
+// - organization matches orgId
+// - volunteer_id is in the driverUID CSV string
+// - status is "unassigned" (case-insensitive)
+app.get('/api/organizations/:orgId/volunteers/:volunteerId/unassigned-rides', async (req, res) => {
+  try {
+    const { orgId, volunteerId } = req.params;
+    
+    if (!orgId) {
+      return res.status(400).send({
+        success: false,
+        message: 'Organization ID is required'
+      });
+    }
+
+    if (!volunteerId) {
+      return res.status(400).send({
+        success: false,
+        message: 'Volunteer ID is required'
+      });
+    }
+    
+    const result = await applicationLayer.getUnassignedRidesByOrganizationAndVolunteer(orgId, volunteerId);
+    
+    if (result.success) {
+      return res.status(200).send({
+        success: true,
+        rides: result.rides,
+        count: result.count,
+        orgId: result.orgId,
+        volunteerId: result.volunteerId
+      });
+    } else {
+      // Determine appropriate status code
+      let statusCode = 400;
+      if (result.message && result.message.includes('not found')) {
+        statusCode = 404; // Not Found
+      } else if (result.message && result.message.includes('authentication')) {
+        statusCode = 401; // Unauthorized
+      }
+
+      return res.status(statusCode).send({
+        success: false,
+        message: result.message || 'Failed to fetch rides',
+        error: result.error
+      });
+    }
+  } catch (error) {
+    console.error('Error in GET /api/organizations/:orgId/volunteers/:volunteerId/unassigned-rides endpoint:', error);
+    res.status(500).send({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+});
+
 // Endpoint to match drivers for a specific ride
 // This endpoint takes a ride document ID and returns available/unavailable drivers
 // based on their availability and the ride's timeframe (Date, pickupTme, appointmentTime, estimatedDuration, tripType)

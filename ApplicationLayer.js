@@ -3253,6 +3253,46 @@ async function assignDriverToRide(rideId, volunteerId) {
   }
 }
 
+// Get unassigned rides for an organization and volunteer
+async function getUnassignedRidesByOrganizationAndVolunteer(orgId, volunteerId) {
+  try {
+    if (!orgId || (typeof orgId === 'string' && orgId.trim() === '')) {
+      return {
+        success: false,
+        message: 'Organization ID is required'
+      };
+    }
+
+    if (!volunteerId || (typeof volunteerId === 'string' && volunteerId.trim() === '')) {
+      return {
+        success: false,
+        message: 'Volunteer ID is required'
+      };
+    }
+
+    const result = await dataAccess.getUnassignedRidesByOrganizationAndVolunteer(orgId, volunteerId);
+    
+    if (result.success) {
+      return {
+        success: true,
+        rides: result.rides,
+        count: result.count,
+        orgId: result.orgId,
+        volunteerId: result.volunteerId
+      };
+    }
+
+    return result;
+  } catch (error) {
+    console.error('Error in getUnassignedRidesByOrganizationAndVolunteer:', error);
+    return {
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    };
+  }
+}
+
 // Organization CRUD functions
 async function createOrganization(orgData, authToken) {
   try {
@@ -3809,6 +3849,7 @@ module.exports = {
   getVolunteerUnavailabilityConflict,
   convertFirestoreTimestamp,
   getRidesByTimeframe,
+  getUnassignedRidesByOrganizationAndVolunteer,
   createOrganization,
   getOrganization,
   getAllOrganizations,
