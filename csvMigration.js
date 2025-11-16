@@ -665,7 +665,7 @@ async function migrateCallData(filePath, organization) {
 // --- Main Execution ---
 (async () => {
     // --- SET YOUR ORGANIZATION HERE ---
-    const ORGANIZATION_TO_MIGRATE = "BriPen";
+    const ORGANIZATION_TO_MIGRATE = "bripen";
 
     if (!ORGANIZATION_TO_MIGRATE) {
         console.error("Error: ORGANIZATION_TO_MIGRATE variable is not set. Halting script.");
