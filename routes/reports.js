@@ -1,47 +1,54 @@
 const express = require("express");
 const router = express.Router();
-
-// Firestore
 const admin = require("firebase-admin");
 const db = admin.firestore();
 
 /**
  * POST /api/reports
- * REQUIRED:
- *  - selectedParams (array)
- *  - collection (string)
- *  - start_date (nullable but must exist in body)
- *  - end_date (nullable but must exist in body)
- *
- * Saves the report configuration and returns document_id.
+ * Body: { selectedParams: string[], collection: "clients" | "volunteers" | "rides" }
+ * Saves the report definition and returns document_id (required for GET).
  */
-router.post("/reports", async (req, res) => {
+router.post("/", async (req, res) => {
   try {
-    const { selectedParams, collection, start_date, end_date } = req.body;
+    const { selectedParams, collection } = req.body;
 
-    // Required fields
-    if (!selectedParams || !collection) {
+    // ---- validation ----
+    if (!Array.isArray(selectedParams) || selectedParams.length === 0) {
       return res.status(400).json({
         success: false,
-        message: "selectedParams and collection are required.",
+        message: "selectedParams must be a non-empty array",
       });
     }
 
-    // Save report configuration
-    const saved = await db.collection("savedReports").add({
+    if (!collection) {
+      return res.status(400).json({
+        success: false,
+        message: "collection is required",
+      });
+    }
+
+    const allowedCollections = ["clients", "volunteers", "rides"];
+    if (!allowedCollections.includes(collection)) {
+      return res.status(400).json({
+        success: false,
+        message: `collection must be one of: ${allowedCollections.join(", ")}`,
+      });
+    }
+
+    // ---- save report definition ----
+    const docRef = await db.collection("savedReports").add({
       selectedParams,
       collection,
-      start_date: start_date || null,
-      end_date: end_date || null,
-      created_at: new Date(),
+      createdAt: new Date(),
     });
 
     return res.json({
       success: true,
-      document_id: saved.id,
+      message: "Report definition saved",
+      document_id: docRef.id, // <-- this is what GET will use
     });
   } catch (error) {
-    console.error("POST /reports error:", error);
+    console.error("POST /api/reports error:", error);
     return res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -49,69 +56,97 @@ router.post("/reports", async (req, res) => {
   }
 });
 
-
 /**
- * GET /api/reports/:document_id
+ * GET /api/reports
+ * Query: ?document_id=...&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
  *
- * REQUIRED:
- *  - Use document_id passed from POST
- *  - Load savedParams + collection + dates
- *  - Query entire collection
- *  - Apply date filtering
- *  - Return ONLY the selected fields
- *  - MUST include the correct reference ID:
- *      clients → client_id
- *      volunteers → volunteer_id
- *      rides → request_id
- *
- * DO NOT RETURN doc_id.
+ * Uses the saved report definition (selectedParams + collection) +
+ * optional start_date/end_date to return all matching records.
  */
-router.get("/reports/:document_id", async (req, res) => {
+router.get("/", async (req, res) => {
   try {
-    const { document_id } = req.params;
+    const { document_id, start_date, end_date } = req.query;
 
-    // Load saved report configuration
-    const configDoc = await db.collection("savedReports").doc(document_id).get();
-
-    if (!configDoc.exists) {
-      return res.status(404).json({
+    if (!document_id) {
+      return res.status(400).json({
         success: false,
-        message: "Report configuration not found",
+        message: "document_id is required",
       });
     }
 
-    const { selectedParams, collection, start_date, end_date } = configDoc.data();
+    // ---- load report definition ----
+    const reportSnap = await db.collection("savedReports").doc(document_id).get();
 
-    // Query the entire collection chosen (clients, volunteers, rides)
+    if (!reportSnap.exists) {
+      return res.status(404).json({
+        success: false,
+        message: "Report definition not found for given document_id",
+      });
+    }
+
+    const reportData = reportSnap.data();
+    const { selectedParams, collection } = reportData;
+
+    if (!Array.isArray(selectedParams) || !collection) {
+      return res.status(500).json({
+        success: false,
+        message: "Saved report is missing selectedParams or collection",
+      });
+    }
+
+    // ---- figure out which *_id field to return ----
+    let idFieldName;
+    if (collection === "clients") {
+      idFieldName = "client_id";
+    } else if (collection === "volunteers") {
+      idFieldName = "volunteer_id";
+    } else if (collection === "rides") {
+      idFieldName = "request_id";
+    }
+
+    // ---- fetch whole collection then filter in JS ----
     const snapshot = await db.collection(collection).get();
     const results = [];
+
+    // parse optional dates
+    const startDate = start_date ? new Date(start_date) : null;
+    const endDate = end_date ? new Date(end_date) : null;
 
     snapshot.forEach((doc) => {
       const data = doc.data();
 
-      // Apply date filtering if required
-      if (start_date || end_date) {
-        const recordDate = data.date ? new Date(data.date) : null;
-
-        if (start_date && recordDate < new Date(start_date)) return;
-        if (end_date && recordDate > new Date(end_date)) return;
+      // Optional date filter (Helen’s example with "date")
+      if (startDate || endDate) {
+        const docDate = data.date ? new Date(data.date) : null;
+        if (!docDate) {
+          // no date -> skip because we don't want null values
+          return;
+        }
+        if (startDate && docDate < startDate) return;
+        if (endDate && docDate > endDate) return;
       }
 
-      // Only return selected fields
+      // build filtered object with ONLY selected fields
       const filtered = {};
+      let hasAllValues = true;
+
       selectedParams.forEach((field) => {
-        if (data[field] !== undefined) {
-          filtered[field] = data[field];
+        const value = data[field];
+        if (value === undefined || value === null) {
+          hasAllValues = false; // we don't want null values at all
+        } else {
+          filtered[field] = value;
         }
       });
 
-      // REQUIRED: attach correct reference ID depending on collection
-      if (collection === "clients") {
-        filtered.client_id = doc.id;
-      } else if (collection === "volunteers") {
-        filtered.volunteer_id = doc.id;
-      } else if (collection === "rides") {
-        filtered.request_id = doc.id;
+      if (!hasAllValues) {
+        // at least one selected field is null/undefined → skip this record
+        return;
+      }
+
+      // attach proper *_id from document id (tied to reference)
+      if (idFieldName) {
+        filtered[idFieldName] = doc.id;
       }
 
       results.push(filtered);
@@ -119,10 +154,13 @@ router.get("/reports/:document_id", async (req, res) => {
 
     return res.json({
       success: true,
+      document_id,
+      collection,
+      selectedParams,
       data: results,
     });
   } catch (error) {
-    console.error("GET /reports/:document_id error:", error);
+    console.error("GET /api/reports error:", error);
     return res.status(500).json({
       success: false,
       message: "Internal server error",
