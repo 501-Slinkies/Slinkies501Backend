@@ -27,6 +27,8 @@ const port = 3000;
 const allowedOrigins = [
     'https://app.flutterflow.io', // Flutterflow testing domain
     'https://slinkies-712r84.flutterflow.app', // Live flutterflow domain
+    'http://localhost:3000', // Local development
+    'https://axo-lift.webdev.gccis.rit.edu', // RIT GCCIS Axo Lift domain
     // Other domains that need to access the API go here
 ];
 
