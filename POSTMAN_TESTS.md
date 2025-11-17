@@ -962,7 +962,17 @@ Content-Type: application/json
 Authorization: Bearer YOUR_TOKEN (optional)
 ```
 
-#### Request Body (Full Example)
+#### Description
+Creates a new organization. When `sys_admin_role` and `sys_admin_password` are provided along with primary contact (`pc_email`) and/or secondary contact (`sc_email`), the system will automatically create volunteer accounts for those contacts with the specified role and password.
+
+**Automatic Volunteer Creation:**
+- If `pc_email` is provided, a volunteer account is created for the primary contact
+- If `sc_email` is provided, a volunteer account is created for the secondary contact
+- Both volunteers are assigned the `sys_admin_role` and `sys_admin_password`
+- Both volunteers are linked to the new organization
+- Contact information (name, phone, address) is automatically populated from the organization data
+
+#### Request Body (Full Example with Volunteer Creation)
 ```json
 {
   "name": "Greater Southern Tier Transportation Services",
@@ -994,6 +1004,8 @@ Authorization: Bearer YOUR_TOKEN (optional)
   "sc_city": "Elmira",
   "sc_state": "NY",
   "sc_zip": "14901",
+  "sys_admin_role": "sys_admin",
+  "sys_admin_password": "SecurePassword123!",
   "sys_admin_phone_number": "607-555-0103",
   "sys_admin_user_id": "admin-user-001",
   "sys_admin_security_level": "Super Admin"
@@ -1003,19 +1015,86 @@ Authorization: Bearer YOUR_TOKEN (optional)
 #### Request Body (Minimal Example - Only Required Fields)
 ```json
 {
-  "name": "Test Organization",
-  "org_id": "TEST-ORG-001"
+  "short_name": "Test Organization"
 }
 ```
 
-#### Expected Response (Success - 201)
+#### Request Body (With Volunteer Creation)
+```json
+{
+  "short_name": "Test Organization",
+  "name": "Test Organization Inc",
+  "pc_name": "John Smith",
+  "pc_email": "john@testorg.com",
+  "pc_phone_number": "555-0100",
+  "sc_name": "Jane Doe",
+  "sc_email": "jane@testorg.com",
+  "sc_phone_number": "555-0101",
+  "sys_admin_role": "sys_admin",
+  "sys_admin_password": "SecurePassword123!"
+}
+```
+
+#### Expected Response (Success - 201 - Without Volunteers)
 ```json
 {
   "success": true,
   "message": "Organization created successfully",
   "data": {
     "orgId": "firestore-document-id",
-    "organizationId": "GST-TRANS-001"
+    "organizationId": "firestore-document-id"
+  }
+}
+```
+
+#### Expected Response (Success - 201 - With Volunteers Created)
+```json
+{
+  "success": true,
+  "message": "Organization created successfully. Created 2 volunteer(s) with sys_admin role.",
+  "data": {
+    "orgId": "firestore-document-id",
+    "organizationId": "firestore-document-id",
+    "volunteers": [
+      {
+        "type": "primary_contact",
+        "userId": "volunteer-firebase-id-1",
+        "userID": "user-id-1",
+        "email": "john.smith@gsttransport.org"
+      },
+      {
+        "type": "secondary_contact",
+        "userId": "volunteer-firebase-id-2",
+        "userID": "user-id-2",
+        "email": "jane.doe@gsttransport.org"
+      }
+    ]
+  }
+}
+```
+
+#### Expected Response (Success - 201 - With Partial Volunteer Creation)
+```json
+{
+  "success": true,
+  "message": "Organization created successfully. Created 1 volunteer(s) with sys_admin role. Warning: 1 volunteer creation(s) failed.",
+  "data": {
+    "orgId": "firestore-document-id",
+    "organizationId": "firestore-document-id",
+    "volunteers": [
+      {
+        "type": "primary_contact",
+        "userId": "volunteer-firebase-id-1",
+        "userID": "user-id-1",
+        "email": "john.smith@gsttransport.org"
+      }
+    ],
+    "volunteerErrors": [
+      {
+        "type": "secondary_contact",
+        "error": "User with this email already exists"
+      }
+    ]
   }
 }
 ```
@@ -1285,7 +1364,207 @@ Authorization: Bearer YOUR_TOKEN (optional)
 
 ## Rides
 
-### 1. Match Drivers for a Ride (GET)
+### 1. Create Ride Request (POST)
+
+#### Endpoint
+```
+POST /api/rides
+```
+
+#### Headers
+```
+Content-Type: application/json
+Authorization: Bearer YOUR_TOKEN (optional)
+```
+
+#### Description
+Creates a new ride request. The UID will be auto-generated if not provided. 
+
+**Recurring Rides:** When the `recurring` field is set, the system automatically generates future ride instances based on the pattern:
+- **Weekly**: Every 7 days
+- **Bi-Weekly**: Every 14 days
+- **Monthly**: Every month
+- **Bi-Monthly**: Every 2 months
+- **Yearly**: Every year
+- **Bi-Yearly**: Every 2 years
+
+By default, recurring rides are generated for 6 months from the start date. You can control this with:
+- `recurringEndDate`: Stop generating instances after this date (ISO format)
+- `recurringCount`: Generate exactly this many instances (alternative to end date)
+
+Each generated instance is a separate ride document with:
+- Unique UID
+- Updated Date and appointmentTime
+- `isRecurringInstance: true`
+- `parentRideUID`: Links back to the original ride
+- `recurringInstanceNumber`: Sequence number (1, 2, 3, etc.)
+
+#### Request Body (Required Fields)
+```json
+{
+  "clientUID": "client123",
+  "Date": "2025-01-15",
+  "appointmentTime": "2025-01-15T10:00:00Z",
+  "appointment_type": "Medical",
+  "purpose": "Doctor appointment"
+}
+```
+
+#### Request Body (Full Example with Optional Fields)
+```json
+{
+  "clientUID": "client123",
+  "Date": "2025-01-15",
+  "appointmentTime": "2025-01-15T10:00:00Z",
+  "appointment_type": "Medical",
+  "purpose": "Doctor appointment",
+  "status": "Scheduled",
+  "tripType": "RoundTrip",
+  "recurring": "Weekly",
+  "recurringEndDate": "2025-07-15",
+  "driverUID": "driver123",
+  "dispatcherUID": "dispatcher123",
+  "destinationUID": "destination123",
+  "organization": "org123",
+  "pickupTime": "09:00 AM",
+  "estimatedDuration": 60,
+  "milesDriven": 0,
+  "volunteerHours": 0,
+  "donationReceived": "None",
+  "donationAmount": 0,
+  "internalComment": "Internal notes",
+  "externalComment": "External notes",
+  "startLocation": "123 Main St",
+  "endLocation": "456 Oak Ave",
+  "additionalClient1_Name": "Jane Doe",
+  "additionalClient1_Rel": "Spouse"
+}
+```
+
+#### Request Body (With Recurring Field)
+```json
+{
+  "clientUID": "client123",
+  "Date": "2025-01-15",
+  "appointmentTime": "2025-01-15T10:00:00Z",
+  "appointment_type": "Medical",
+  "purpose": "Weekly checkup",
+  "recurring": "Weekly"
+}
+```
+
+#### Valid Recurring Values
+- `Weekly`
+- `Bi-Weekly`
+- `Monthly`
+- `Bi-Monthly`
+- `Yearly`
+- `Bi-Yearly`
+
+#### Expected Response (Success - 201 - Single Ride)
+```json
+{
+  "success": true,
+  "message": "Ride created successfully",
+  "ride": {
+    "id": "firestore-doc-id",
+    "UID": "ride_1234567890_abc123",
+    "clientUID": "client123",
+    "Date": "2025-01-15",
+    "appointmentTime": "2025-01-15T10:00:00Z",
+    "appointment_type": "Medical",
+    "purpose": "Doctor appointment",
+    "status": "Scheduled",
+    "tripType": "RoundTrip",
+    "CreatedAt": "2025-01-10T12:00:00.000Z",
+    "UpdatedAt": "2025-01-10T12:00:00.000Z"
+  }
+}
+```
+
+#### Expected Response (Success - 201 - Recurring Ride)
+```json
+{
+  "success": true,
+  "message": "Ride created successfully with 26 recurring instances",
+  "ride": {
+    "id": "firestore-doc-id",
+    "UID": "ride_1234567890_abc123",
+    "clientUID": "client123",
+    "Date": "2025-01-15",
+    "appointmentTime": "2025-01-15T10:00:00Z",
+    "appointment_type": "Medical",
+    "purpose": "Weekly checkup",
+    "status": "Scheduled",
+    "tripType": "RoundTrip",
+    "recurring": "Weekly",
+    "isRecurringParent": true,
+    "CreatedAt": "2025-01-10T12:00:00.000Z",
+    "UpdatedAt": "2025-01-10T12:00:00.000Z"
+  },
+  "recurringInstances": [
+    {
+      "id": "firestore-doc-id-2",
+      "UID": "ride_1234567890_abc123_1",
+      "clientUID": "client123",
+      "Date": "2025-01-22",
+      "appointmentTime": "2025-01-22T10:00:00Z",
+      "appointment_type": "Medical",
+      "purpose": "Weekly checkup",
+      "status": "Scheduled",
+      "tripType": "RoundTrip",
+      "recurring": "Weekly",
+      "isRecurringInstance": true,
+      "parentRideUID": "ride_1234567890_abc123",
+      "recurringInstanceNumber": 1,
+      "CreatedAt": "2025-01-10T12:00:00.000Z",
+      "UpdatedAt": "2025-01-10T12:00:00.000Z"
+    }
+    // ... more instances
+  ],
+  "totalRidesCreated": 27
+}
+```
+
+#### Expected Response (Error - 400 - Missing Required Fields)
+```json
+{
+  "success": false,
+  "message": "Missing required fields: clientUID, Date",
+  "error": null
+}
+```
+
+#### Expected Response (Error - 400 - Invalid Recurring Value)
+```json
+{
+  "success": false,
+  "message": "Invalid recurring value. Must be one of: Weekly, Bi-Weekly, Monthly, Bi-Monthly, Yearly, Bi-Yearly",
+  "error": "Provided value: Daily"
+}
+```
+
+#### Expected Response (Error - 409 - Duplicate UID)
+```json
+{
+  "success": false,
+  "message": "Ride with this UID already exists",
+  "error": null
+}
+```
+
+#### Expected Response (Error - 500 - Server Error)
+```json
+{
+  "success": false,
+  "message": "Server error creating ride.",
+  "error": "Error message details"
+}
+```
+
+---
+
+### 2. Match Drivers for a Ride (GET)
 
 #### Endpoint
 ```
