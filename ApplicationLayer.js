@@ -294,12 +294,23 @@ async function updateRole(roleName, updateData, authToken) {
     const result = await dataAccess.updateRole(roleName, updateData);
 
     if (result.success) {
-      return {
+      const response = {
         success: true,
         message: 'Role updated successfully',
         role: result.role,
         collection: result.collection
       };
+
+      // Include rename information if the role was renamed
+      if (result.renamed) {
+        response.renamed = true;
+        response.oldId = result.oldId;
+        response.newId = result.newId;
+      } else {
+        response.renamed = false;
+      }
+
+      return response;
     } else {
       return {
         success: false,
