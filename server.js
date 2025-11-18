@@ -635,11 +635,21 @@ app.post('/api/organizations', async (req, res) => {
         success: true
       });
 
-      res.status(201).send({
+      const response = {
         success: true,
         message: result.message,
         data: result.data
-      });
+      };
+      
+      // Include volunteer creation details if present
+      if (result.data.createdVolunteers && result.data.createdVolunteers.length > 0) {
+        response.data.volunteers = result.data.createdVolunteers;
+      }
+      if (result.data.volunteerErrors) {
+        response.data.volunteerErrors = result.data.volunteerErrors;
+      }
+      
+      res.status(201).send(response);
     } else {
       // Log failed organization creation attempt
       await auditLogger.logAccess({
