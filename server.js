@@ -1148,11 +1148,22 @@ app.put('/api/roles/:roleName', async (req, res) => {
         success: true
       });
 
-      res.status(200).send({
+      const response = {
         success: true,
         message: result.message,
         role: result.role
-      });
+      };
+
+      // Include rename information if the role was renamed
+      if (result.renamed !== undefined) {
+        response.renamed = result.renamed;
+        if (result.renamed && result.oldId && result.newId) {
+          response.oldId = result.oldId;
+          response.newId = result.newId;
+        }
+      }
+
+      res.status(200).send(response);
     } else {
       // Log failed update attempt
       await auditLogger.logAccess({
@@ -1175,6 +1186,8 @@ app.put('/api/roles/:roleName', async (req, res) => {
         statusCode = 404; // Not Found
       } else if (result.message && result.message.includes('authentication')) {
         statusCode = 401; // Unauthorized
+      } else if (result.message && result.message.includes('already exists')) {
+        statusCode = 409; // Conflict
       }
 
       res.status(statusCode).send({

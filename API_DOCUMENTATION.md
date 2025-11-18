@@ -533,14 +533,16 @@ Get the view field from a role's parent role.
 
 **PUT** `/api/roles/:roleName`
 
-Update an existing role.
+Update an existing role. Supports updating the role name and document ID by creating a new document and deleting the old one.
 
 **Path Parameters:**
-- `roleName` - Name of the role to update
+- `roleName` - Current name of the role to update
 
 **Request Body:**
 ```json
 {
+  "name": "new_role_name",
+  "docId": "new_document_id",
   "org_id": "org-002",
   "parentRole": "default_admin",
   "view": "admin-view"
@@ -548,11 +550,19 @@ Update an existing role.
 ```
 
 **Allowed Fields:**
+- `name` (or `roleName`) - New role name (will also update document ID if `docId` not specified)
+- `docId` (or `documentId`) - New document ID (optional, defaults to new name if name is provided)
 - `org_id` - Organization ID
 - `parentRole` - Parent role name
 - `view` - View field value
 
-**Response (200):**
+**Note:** When updating the role name or document ID:
+- A new document is created with the new name/ID
+- All data is copied from the old document
+- The old document is deleted
+- Associated permission documents are also renamed/updated
+
+**Response (200 - Regular Update):**
 ```json
 {
   "success": true,
@@ -564,7 +574,27 @@ Update an existing role.
     "parentRole": "default_admin",
     "view": "admin-view",
     "updated_at": "2025-01-15T10:00:00.000Z"
-  }
+  },
+  "renamed": false
+}
+```
+
+**Response (200 - With Rename):**
+```json
+{
+  "success": true,
+  "message": "Role updated successfully",
+  "role": {
+    "id": "new_role_name",
+    "name": "new_role_name",
+    "org_id": "org-002",
+    "parentRole": "default_admin",
+    "view": "admin-view",
+    "updated_at": "2025-01-15T10:00:00.000Z"
+  },
+  "renamed": true,
+  "oldId": "coordinator",
+  "newId": "new_role_name"
 }
 ```
 
@@ -574,6 +604,15 @@ Update an existing role.
   "success": false,
   "message": "Role not found",
   "error": "Role not found"
+}
+```
+
+**Response (400 - Conflict):**
+```json
+{
+  "success": false,
+  "message": "Role with name/ID \"new_role_name\" already exists",
+  "error": "Role with name/ID \"new_role_name\" already exists"
 }
 ```
 
