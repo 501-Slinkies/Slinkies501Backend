@@ -529,6 +529,93 @@ Get the view field from a role's parent role.
 }
 ```
 
+#### Update Role
+
+**PUT** `/api/roles/:roleName`
+
+Update an existing role. Supports updating the role name and document ID by creating a new document and deleting the old one.
+
+**Path Parameters:**
+- `roleName` - Current name of the role to update
+
+**Request Body:**
+```json
+{
+  "name": "new_role_name",
+  "docId": "new_document_id",
+  "org_id": "org-002",
+  "parentRole": "default_admin",
+  "view": "admin-view"
+}
+```
+
+**Allowed Fields:**
+- `name` (or `roleName`) - New role name (will also update document ID if `docId` not specified)
+- `docId` (or `documentId`) - New document ID (optional, defaults to new name if name is provided)
+- `org_id` - Organization ID
+- `parentRole` - Parent role name
+- `view` - View field value
+
+**Note:** When updating the role name or document ID:
+- A new document is created with the new name/ID
+- All data is copied from the old document
+- The old document is deleted
+- Associated permission documents are also renamed/updated
+
+**Response (200 - Regular Update):**
+```json
+{
+  "success": true,
+  "message": "Role updated successfully",
+  "role": {
+    "id": "coordinator",
+    "name": "coordinator",
+    "org_id": "org-002",
+    "parentRole": "default_admin",
+    "view": "admin-view",
+    "updated_at": "2025-01-15T10:00:00.000Z"
+  },
+  "renamed": false
+}
+```
+
+**Response (200 - With Rename):**
+```json
+{
+  "success": true,
+  "message": "Role updated successfully",
+  "role": {
+    "id": "new_role_name",
+    "name": "new_role_name",
+    "org_id": "org-002",
+    "parentRole": "default_admin",
+    "view": "admin-view",
+    "updated_at": "2025-01-15T10:00:00.000Z"
+  },
+  "renamed": true,
+  "oldId": "coordinator",
+  "newId": "new_role_name"
+}
+```
+
+**Response (404):**
+```json
+{
+  "success": false,
+  "message": "Role not found",
+  "error": "Role not found"
+}
+```
+
+**Response (400 - Conflict):**
+```json
+{
+  "success": false,
+  "message": "Role with name/ID \"new_role_name\" already exists",
+  "error": "Role with name/ID \"new_role_name\" already exists"
+}
+```
+
 ---
 
 ### Rides Endpoints
@@ -701,6 +788,120 @@ Set the driverUID field in a ride document.
     "driverId": "driver123",
     "updatedRide": { ... }
   }
+}
+```
+
+#### Update Ride by ID
+
+**PUT** `/api/rides/:rideId`
+
+Update an existing ride by document ID.
+
+**Path Parameters:**
+- `rideId` - The ride document ID
+
+**Request Body (any of the following fields):**
+```json
+{
+  "clientUID": "client123",
+  "additionalClient1_name": "John Doe",
+  "additionalClient1_rel": "Father",
+  "driverUID": "driver123",
+  "dispatcherUID": "dispatcher123",
+  "startLocation": "123 Main St",
+  "destinationUID": "destination123",
+  "Date": "2025-01-15",
+  "appointmentTime": "2025-01-15T10:00:00Z",
+  "appointment_type": "Medical",
+  "pickupTme": "09:00 AM",
+  "estimatedDuration": 60,
+  "purpose": "Doctor appointment",
+  "tripType": "RoundTrip",
+  "status": "Scheduled",
+  "wheelchair": false,
+  "wheelchairType": "Manual",
+  "milesDriven": 15,
+  "volunteerHours": 1.5,
+  "donationReceived": "Cash",
+  "donationAmount": 25.50,
+  "confirmation1_Date": "2025-01-14T10:00:00Z",
+  "confirmation1_By": "dispatcher123",
+  "confirmation2_Date": "2025-01-14T14:00:00Z",
+  "confirmation2_By": "client123",
+  "internalComment": "Internal note",
+  "externalComment": "External note",
+  "incidentReport": "No incidents",
+  "assignedTo": "driver123"
+}
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "Ride updated successfully",
+  "ride": {
+    "id": "ride-id",
+    "UID": "ride_1234567890_abc123",
+    "status": "Scheduled",
+    "driverUID": "driver123",
+    ...
+  },
+  "updatedFields": ["status", "driverUID"]
+}
+```
+
+**Response (404):**
+```json
+{
+  "success": false,
+  "message": "Ride not found",
+  "error": "Ride not found"
+}
+```
+
+**Response (400):**
+```json
+{
+  "success": false,
+  "message": "No valid fields to update",
+  "error": "No valid fields to update"
+}
+```
+
+#### Update Ride by UID
+
+**PUT** `/api/rides/uid/:rideUID`
+
+Update an existing ride by UID (unique identifier field).
+
+**Path Parameters:**
+- `rideUID` - The ride UID (unique identifier field)
+
+**Request Body:** Same as Update Ride by ID
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "Ride updated successfully",
+  "ride": {
+    "id": "ride-id",
+    "UID": "ride_1234567890_abc123",
+    "status": "Scheduled",
+    "driverUID": "driver123",
+    ...
+  },
+  "updatedFields": ["status", "driverUID"]
+}
+```
+
+**Response (404):**
+```json
+{
+  "success": false,
+  "message": "Ride not found",
+  "error": "Ride not found"
 }
 ```
 

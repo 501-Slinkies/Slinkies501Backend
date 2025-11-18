@@ -105,6 +105,215 @@ async function createRole(roleData) {
   }
 }
 
+async function updateRole(roleName, updateData) {
+  const db = getFirestore();
+  try {
+    if (!roleName || typeof roleName !== 'string' || roleName.trim() === '') {
+      return { success: false, error: 'Role name is required' };
+    }
+
+    const normalizedRoleName = roleName.trim();
+
+    // Try multiple collection names for compatibility
+    const roleCollections = ['roles', 'Roles', 'role', 'Role'];
+    let roleFound = false;
+    let roleCollection = null;
+    let roleDoc = null;
+    let roleRef = null;
+
+    // First, find the role document
+    for (const collectionName of roleCollections) {
+      try {
+        roleRef = db.collection(collectionName).doc(normalizedRoleName);
+        const docSnapshot = await roleRef.get();
+        
+        if (docSnapshot.exists) {
+          roleFound = true;
+          roleCollection = collectionName;
+          roleDoc = { id: docSnapshot.id, ...docSnapshot.data() };
+          break;
+        }
+      } catch (error) {
+        console.warn(`Failed to check role in ${collectionName}:`, error.message);
+        continue;
+      }
+    }
+
+    // If not found by document ID, try querying by name field
+    if (!roleFound) {
+      for (const collectionName of roleCollections) {
+        try {
+          const snapshot = await db.collection(collectionName)
+            .where('name', '==', normalizedRoleName)
+            .limit(1)
+            .get();
+          
+          if (!snapshot.empty) {
+            const doc = snapshot.docs[0];
+            roleFound = true;
+            roleCollection = collectionName;
+            roleRef = doc.ref;
+            roleDoc = { id: doc.id, ...doc.data() };
+            break;
+          }
+        } catch (error) {
+          console.warn(`Failed to query role in ${collectionName}:`, error.message);
+          continue;
+        }
+      }
+    }
+
+    if (!roleFound || !roleDoc || !roleRef) {
+      return { success: false, error: 'Role not found' };
+    }
+
+    const currentData = roleDoc;
+    const newName = updateData.name || updateData.roleName;
+    const newDocId = updateData.docId || updateData.documentId || newName;
+    
+    // Check if name or document ID is being changed
+    const nameChanging = newName && newName.trim() !== normalizedRoleName && newName.trim() !== currentData.name;
+    const docIdChanging = newDocId && newDocId.trim() !== normalizedRoleName && newDocId.trim() !== roleDoc.id;
+
+    // If name or document ID is changing, we need to create a new document and delete the old one
+    if (nameChanging || docIdChanging) {
+      const finalNewName = (newName || normalizedRoleName).trim();
+      const finalNewDocId = (newDocId || finalNewName).trim();
+
+      // Check if a role with the new name/doc ID already exists
+      for (const collectionName of roleCollections) {
+        try {
+          const checkRef = db.collection(collectionName).doc(finalNewDocId);
+          const checkDoc = await checkRef.get();
+          
+          if (checkDoc.exists) {
+            return { success: false, error: `Role with name/ID "${finalNewDocId}" already exists` };
+          }
+
+          // Also check by name field if different from doc ID
+          if (finalNewName !== finalNewDocId) {
+            const nameCheckSnapshot = await db.collection(collectionName)
+              .where('name', '==', finalNewName)
+              .limit(1)
+              .get();
+            
+            if (!nameCheckSnapshot.empty) {
+              return { success: false, error: `Role with name "${finalNewName}" already exists` };
+            }
+          }
+        } catch (error) {
+          console.warn(`Failed to check for existing role in ${collectionName}:`, error.message);
+        }
+      }
+
+      // Prepare the new document data
+      const newRoleData = {
+        ...currentData,
+        name: finalNewName,
+        updated_at: new Date()
+      };
+
+      // Apply other field updates
+      const allowedFields = ['org_id', 'parentRole', 'view'];
+      for (const field of allowedFields) {
+        if (updateData.hasOwnProperty(field)) {
+          newRoleData[field] = updateData[field];
+        }
+      }
+
+      // Remove id from newRoleData since it will be set by Firestore
+      delete newRoleData.id;
+
+      // Create new document with new ID
+      const newRoleRef = db.collection(roleCollection).doc(finalNewDocId);
+      await newRoleRef.set(newRoleData);
+
+      // Update permission document if it exists and references the old role name
+      const permissionCollections = ['Permissions', 'permissions', 'Permission', 'permission'];
+      for (const permCollectionName of permissionCollections) {
+        try {
+          const oldPermissionRef = db.collection(permCollectionName).doc(normalizedRoleName);
+          const oldPermissionDoc = await oldPermissionRef.get();
+          
+          if (oldPermissionDoc.exists) {
+            // Create new permission document with new name
+            const newPermissionRef = db.collection(permCollectionName).doc(finalNewName);
+            await newPermissionRef.set(oldPermissionDoc.data());
+            
+            // Update role to reference new permission
+            await newRoleRef.update({
+              permission_set: newPermissionRef
+            });
+            
+            // Delete old permission document
+            await oldPermissionRef.delete();
+            break;
+          }
+        } catch (error) {
+          console.warn(`Failed to update permission reference in ${permCollectionName}:`, error.message);
+        }
+      }
+
+      // Delete old role document
+      await roleRef.delete();
+
+      // Get the new document
+      const updatedDoc = await newRoleRef.get();
+
+      return {
+        success: true,
+        role: { id: updatedDoc.id, ...updatedDoc.data() },
+        collection: roleCollection,
+        renamed: true,
+        oldId: normalizedRoleName,
+        newId: finalNewDocId
+      };
+    } else {
+      // Regular update without renaming
+      // Prepare update object with only allowed fields
+      const allowedFields = ['org_id', 'parentRole', 'view'];
+      const updateObject = {
+        updated_at: new Date()
+      };
+
+      // Add allowed fields that are being updated
+      for (const field of allowedFields) {
+        if (updateData.hasOwnProperty(field)) {
+          updateObject[field] = updateData[field];
+        }
+      }
+
+      // Validate org_id change if it's being updated
+      if (updateObject.org_id && updateObject.org_id !== currentData.org_id) {
+        // Check if another role with the same name already has this org_id
+        // (This validation is optional - roles are typically unique by name, not org_id)
+        // We'll allow org_id updates for now
+      }
+
+      // If no fields to update (besides updated_at), return error
+      if (Object.keys(updateObject).length === 1) {
+        return { success: false, error: 'No valid fields to update' };
+      }
+
+      // Update the role document
+      await roleRef.update(updateObject);
+
+      // Get the updated document
+      const updatedDoc = await roleRef.get();
+
+      return {
+        success: true,
+        role: { id: updatedDoc.id, ...updatedDoc.data() },
+        collection: roleCollection,
+        renamed: false
+      };
+    }
+  } catch (error) {
+    console.error("Error updating role:", error);
+    return { success: false, error: error.message };
+  }
+}
+
 async function createPermission(permissionData) {
   const db = getFirestore();
   try {
@@ -1761,7 +1970,8 @@ async function addVolunteerUnavailability(volunteerId, entries = []) {
 
 module.exports = { 
   login, 
-  createRole, 
+  createRole,
+  updateRole, 
   createPermission,
   createPermissionAndUpdateRole, 
   getRoleByName,
