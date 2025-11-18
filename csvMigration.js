@@ -23,13 +23,13 @@ function findKey(row, target) {
 }
 
 function parseDuration(durationStr) {
-    if (!durationStr) return "";
+    if (!durationStr) return 0;
     let totalMinutes = 0;
     const hourMatch = durationStr.match(/(\d+)\s*hr/);
     const minMatch = durationStr.match(/(\d+)\s*min/);
     if (hourMatch) totalMinutes += parseInt(hourMatch[1], 10) * 60;
     if (minMatch) totalMinutes += parseInt(minMatch[1], 10);
-    return totalMinutes > 0 ? totalMinutes : "";
+    return totalMinutes > 0 ? totalMinutes : 0;
 }
 
 function parseWheelchair(wheelchairStr) {
@@ -375,7 +375,7 @@ async function migrateVolunteers(filePath, organization) {
                     zip: row[findKey(row, "ZIP")]?.trim() || row[findKey(row, "ZIP ")]?.trim() || '00000',
                     volunteering_status: row[findKey(row, "VOLUNTEERING STATUS")]?.trim() || 'active',
                     role: (row[findKey(row, "VOLUNTEER POSITION")]?.split(';').map(r => r.trim()).filter(Boolean)) || ['driver'],
-                    email_address: email || 'N/A',
+                    email: email || 'N/A',
                     primary_phone: row[findKey(row, "PRIMARY PHONE")]?.trim() || 'N/A',
                     primary_iscell: row[findKey(row, "primary isCell")]?.trim().toUpperCase() === 'Y',
                     primary_text: row[findKey(row, "primary can text")]?.trim().toUpperCase() === 'Y',
@@ -665,7 +665,7 @@ async function migrateCallData(filePath, organization) {
 
 // --- Main Execution ---
 (async () => {
-    // --- SET YOUR ORGANIZATION HERE ---
+    // --- SET YOUR ORGANIZATION HERE FOR COMMAND LINE USE ---
     const ORGANIZATION_TO_MIGRATE = "bripen";
 
     if (!ORGANIZATION_TO_MIGRATE) {
@@ -673,10 +673,10 @@ async function migrateCallData(filePath, organization) {
         return;
     }
 
-    // Set optional limits for testing, or comment out to process all rows.
-    //migrateClients.limit = 5;
-    //migrateVolunteers.limit = 5;
-    //migrateCallData.limit = 15;
+    // // Set optional limits for testing, or comment out to process all rows.
+    // migrateClients.limit = 5;
+    // migrateVolunteers.limit = 5;
+    // migrateCallData.limit = 15;
 
     console.log(`Starting client migration for org: ${ORGANIZATION_TO_MIGRATE}...`);
     await migrateClients("./fakeClients.csv", ORGANIZATION_TO_MIGRATE);
