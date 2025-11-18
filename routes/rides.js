@@ -550,5 +550,174 @@ router.post("/by-driver", async (req, res) => {
   }
 });
 
+/**
+ * ============================================================================
+ * ✅ PUT /api/rides/:rideId
+ * Update a ride by document ID
+ * 
+ * Path Parameters:
+ * - rideId - The ride document ID
+ * 
+ * Request Body (any of the following fields):
+ * {
+ *   "clientUID": "client123",
+ *   "additionalClient1_name": "John Doe",
+ *   "additionalClient1_rel": "Father",
+ *   "driverUID": "driver123",
+ *   "dispatcherUID": "dispatcher123",
+ *   "startLocation": "123 Main St",
+ *   "destinationUID": "destination123",
+ *   "Date": "2025-01-15",
+ *   "appointmentTime": "2025-01-15T10:00:00Z",
+ *   "appointment_type": "Medical",
+ *   "pickupTme": "09:00 AM",
+ *   "estimatedDuration": 60,
+ *   "purpose": "Doctor appointment",
+ *   "tripType": "RoundTrip",
+ *   "status": "Scheduled",
+ *   "wheelchair": false,
+ *   "wheelchairType": "Manual",
+ *   "milesDriven": 15,
+ *   "volunteerHours": 1.5,
+ *   "donationReceived": "Cash",
+ *   "donationAmount": 25.50,
+ *   "confirmation1_Date": "2025-01-14T10:00:00Z",
+ *   "confirmation1_By": "dispatcher123",
+ *   "confirmation2_Date": "2025-01-14T14:00:00Z",
+ *   "confirmation2_By": "client123",
+ *   "internalComment": "Internal note",
+ *   "externalComment": "External note",
+ *   "incidentReport": "No incidents",
+ *   "assignedTo": "driver123"
+ * }
+ * 
+ * Response (200):
+ * {
+ *   "success": true,
+ *   "message": "Ride updated successfully",
+ *   "ride": { ... },
+ *   "updatedFields": ["status", "driverUID"]
+ * }
+ * ============================================================================
+ */
+router.put("/:rideId", async (req, res) => {
+  try {
+    const { rideId } = req.params;
+    const updateData = req.body;
+
+    // Validate required fields
+    if (!rideId) {
+      return res.status(400).json({
+        success: false,
+        message: "Ride ID is required"
+      });
+    }
+
+    // Update the ride
+    const result = await applicationLayer.updateRideById(rideId, updateData);
+
+    if (result.success) {
+      res.status(200).json({
+        success: true,
+        message: result.message,
+        ride: result.ride,
+        updatedFields: result.updatedFields
+      });
+    } else {
+      // Determine appropriate status code
+      let statusCode = 400;
+      if (result.message && result.message.includes("not found")) {
+        statusCode = 404; // Not Found
+      } else if (result.message && result.message.includes("No valid fields")) {
+        statusCode = 400; // Bad Request
+      } else {
+        statusCode = 500; // Internal Server Error
+      }
+
+      res.status(statusCode).json({
+        success: false,
+        message: result.message || "Failed to update ride",
+        error: result.error
+      });
+    }
+  } catch (error) {
+    console.error("🔥 Error in PUT /api/rides/:rideId endpoint:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error updating ride.",
+      error: error.message
+    });
+  }
+});
+
+/**
+ * ============================================================================
+ * ✅ PUT /api/rides/uid/:rideUID
+ * Update a ride by UID
+ * 
+ * Path Parameters:
+ * - rideUID - The ride UID (unique identifier field)
+ * 
+ * Request Body: Same as PUT /api/rides/:rideId
+ * 
+ * Response (200):
+ * {
+ *   "success": true,
+ *   "message": "Ride updated successfully",
+ *   "ride": { ... },
+ *   "updatedFields": ["status", "driverUID"]
+ * }
+ * ============================================================================
+ */
+router.put("/uid/:rideUID", async (req, res) => {
+  try {
+    const { rideUID } = req.params;
+    const updateData = req.body;
+
+    // Validate required fields
+    if (!rideUID) {
+      return res.status(400).json({
+        success: false,
+        message: "Ride UID is required"
+      });
+    }
+
+    // Update the ride
+    const result = await applicationLayer.updateRideByUID(rideUID, updateData);
+
+    if (result.success) {
+      res.status(200).json({
+        success: true,
+        message: result.message,
+        ride: result.ride,
+        updatedFields: result.updatedFields
+      });
+    } else {
+      // Determine appropriate status code
+      let statusCode = 400;
+      if (result.message && result.message.includes("not found")) {
+        statusCode = 404; // Not Found
+      } else if (result.message && result.message.includes("No valid fields")) {
+        statusCode = 400; // Bad Request
+      } else {
+        statusCode = 500; // Internal Server Error
+      }
+
+      res.status(statusCode).json({
+        success: false,
+        message: result.message || "Failed to update ride",
+        error: result.error
+      });
+    }
+  } catch (error) {
+    console.error("🔥 Error in PUT /api/rides/uid/:rideUID endpoint:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error updating ride.",
+      error: error.message
+    });
+  }
+});
+
 
 module.exports = router;

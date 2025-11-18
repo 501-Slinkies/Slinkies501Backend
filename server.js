@@ -1107,6 +1107,92 @@ app.get('/api/roles/:roleName/parent/view', async (req, res) => {
   }
 });
 
+// Update role endpoint
+app.put('/api/roles/:roleName', async (req, res) => {
+  try {
+    const auditLogger = require('./AuditLogger');
+    const { getClientIp, getUserAgent } = require('./middleware/securityMiddleware');
+    
+    // Extract the roleName from URL parameters
+    const { roleName } = req.params;
+    
+    // Extract authentication token if provided (optional for now, required in production)
+    let authToken = null;
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      authToken = authHeader.substring(7);
+    }
+
+    // Extract update data from request body
+    const updateData = req.body;
+
+    // Update the role
+    const result = await applicationLayer.updateRole(roleName, updateData, authToken);
+
+    // Log the update attempt
+    const ipAddress = getClientIp ? getClientIp(req) : req.ip;
+    const userAgent = getUserAgent ? getUserAgent(req) : req.get('user-agent');
+    
+    if (result.success) {
+      // Log successful role update
+      await auditLogger.logAccess({
+        userId: authToken ? 'authenticated' : 'unknown',
+        userEmail: 'unknown',
+        userRole: 'unknown',
+        organizationId: result.role?.org_id || 'N/A',
+        action: 'UPDATE',
+        resourceType: 'role',
+        resourceId: roleName,
+        ipAddress: ipAddress,
+        userAgent: userAgent,
+        success: true
+      });
+
+      res.status(200).send({
+        success: true,
+        message: result.message,
+        role: result.role
+      });
+    } else {
+      // Log failed update attempt
+      await auditLogger.logAccess({
+        userId: 'unknown',
+        userEmail: 'unknown',
+        userRole: 'unknown',
+        organizationId: 'N/A',
+        action: 'UPDATE',
+        resourceType: 'role',
+        resourceId: roleName,
+        ipAddress: ipAddress,
+        userAgent: userAgent,
+        success: false,
+        failureReason: result.message
+      });
+
+      // Determine appropriate status code
+      let statusCode = 400;
+      if (result.message && result.message.includes('not found')) {
+        statusCode = 404; // Not Found
+      } else if (result.message && result.message.includes('authentication')) {
+        statusCode = 401; // Unauthorized
+      }
+
+      res.status(statusCode).send({
+        success: false,
+        message: result.message,
+        error: result.error
+      });
+    }
+  } catch (error) {
+    console.error('Error in PUT /api/roles/:roleName endpoint:', error);
+    res.status(500).send({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+});
+
 // Get all rides for a specific driver
 app.get('/api/drivers/:driverID/rides', async (req, res) => {
   try {

@@ -105,6 +105,112 @@ async function createRole(roleData) {
   }
 }
 
+async function updateRole(roleName, updateData) {
+  const db = getFirestore();
+  try {
+    if (!roleName || typeof roleName !== 'string' || roleName.trim() === '') {
+      return { success: false, error: 'Role name is required' };
+    }
+
+    const normalizedRoleName = roleName.trim();
+
+    // Try multiple collection names for compatibility
+    const roleCollections = ['roles', 'Roles', 'role', 'Role'];
+    let roleFound = false;
+    let roleCollection = null;
+    let roleDoc = null;
+    let roleRef = null;
+
+    // First, find the role document
+    for (const collectionName of roleCollections) {
+      try {
+        roleRef = db.collection(collectionName).doc(normalizedRoleName);
+        const docSnapshot = await roleRef.get();
+        
+        if (docSnapshot.exists) {
+          roleFound = true;
+          roleCollection = collectionName;
+          roleDoc = { id: docSnapshot.id, ...docSnapshot.data() };
+          break;
+        }
+      } catch (error) {
+        console.warn(`Failed to check role in ${collectionName}:`, error.message);
+        continue;
+      }
+    }
+
+    // If not found by document ID, try querying by name field
+    if (!roleFound) {
+      for (const collectionName of roleCollections) {
+        try {
+          const snapshot = await db.collection(collectionName)
+            .where('name', '==', normalizedRoleName)
+            .limit(1)
+            .get();
+          
+          if (!snapshot.empty) {
+            const doc = snapshot.docs[0];
+            roleFound = true;
+            roleCollection = collectionName;
+            roleRef = doc.ref;
+            roleDoc = { id: doc.id, ...doc.data() };
+            break;
+          }
+        } catch (error) {
+          console.warn(`Failed to query role in ${collectionName}:`, error.message);
+          continue;
+        }
+      }
+    }
+
+    if (!roleFound || !roleDoc || !roleRef) {
+      return { success: false, error: 'Role not found' };
+    }
+
+    const currentData = roleDoc;
+
+    // Prepare update object with only allowed fields
+    const allowedFields = ['org_id', 'parentRole', 'view'];
+    const updateObject = {
+      updated_at: new Date()
+    };
+
+    // Add allowed fields that are being updated
+    for (const field of allowedFields) {
+      if (updateData.hasOwnProperty(field)) {
+        updateObject[field] = updateData[field];
+      }
+    }
+
+    // Validate org_id change if it's being updated
+    if (updateObject.org_id && updateObject.org_id !== currentData.org_id) {
+      // Check if another role with the same name already has this org_id
+      // (This validation is optional - roles are typically unique by name, not org_id)
+      // We'll allow org_id updates for now
+    }
+
+    // If no fields to update (besides updated_at), return error
+    if (Object.keys(updateObject).length === 1) {
+      return { success: false, error: 'No valid fields to update' };
+    }
+
+    // Update the role document
+    await roleRef.update(updateObject);
+
+    // Get the updated document
+    const updatedDoc = await roleRef.get();
+
+    return {
+      success: true,
+      role: { id: updatedDoc.id, ...updatedDoc.data() },
+      collection: roleCollection
+    };
+  } catch (error) {
+    console.error("Error updating role:", error);
+    return { success: false, error: error.message };
+  }
+}
+
 async function createPermission(permissionData) {
   const db = getFirestore();
   try {
@@ -1761,7 +1867,8 @@ async function addVolunteerUnavailability(volunteerId, entries = []) {
 
 module.exports = { 
   login, 
-  createRole, 
+  createRole,
+  updateRole, 
   createPermission,
   createPermissionAndUpdateRole, 
   getRoleByName,

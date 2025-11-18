@@ -271,6 +271,52 @@ async function createPermissionForRole(roleName, permissionData, authToken) {
   }
 }
 
+async function updateRole(roleName, updateData, authToken) {
+  try {
+    // Token checking disabled for now - skip authentication
+    // if (authToken) {
+    //   const tokenVerification = verifyToken(authToken);
+    //   if (!tokenVerification.success) {
+    //     return { success: false, message: 'Authentication failed' };
+    //   }
+    // }
+
+    // Validate required fields
+    if (!roleName || typeof roleName !== 'string' || roleName.trim() === '') {
+      return { success: false, message: 'Role name is required' };
+    }
+
+    if (!updateData || typeof updateData !== 'object') {
+      return { success: false, message: 'Update data is required' };
+    }
+
+    // Update role document
+    const result = await dataAccess.updateRole(roleName, updateData);
+
+    if (result.success) {
+      return {
+        success: true,
+        message: 'Role updated successfully',
+        role: result.role,
+        collection: result.collection
+      };
+    } else {
+      return {
+        success: false,
+        message: result.error || 'Failed to update role',
+        error: result.error
+      };
+    }
+  } catch (error) {
+    console.error('Error in updateRole:', error);
+    return {
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    };
+  }
+}
+
 // Helper function to parse day abbreviation to day name
 function parseDayAbbreviation(dayAbbr) {
   const dayMap = {
@@ -3397,6 +3443,85 @@ async function updateRideByUID(uid, updateData) {
   }
 }
 
+// Update ride by ID
+async function updateRideById(rideId, updateData) {
+  try {
+    // Define allowed fields based on schema
+    const allowedFields = [
+      "clientUID",
+      "additionalClient1_name",
+      "additionalClient1_rel",
+      "driverUID",
+      "dispatcherUID",
+      "startLocation",
+      "destinationUID",
+      "Date",
+      "appointmentTime",
+      "appointment_type",
+      "pickupTme",
+      "estimatedDuration",
+      "purpose",
+      "tripType",
+      "status",
+      "wheelchair",
+      "wheelchairType",
+      "milesDriven",
+      "volunteerHours",
+      "donationReceived",
+      "donationAmount",
+      "confirmation1_Date",
+      "confirmation1_By",
+      "confirmation2_Date",
+      "confirmation2_By",
+      "internalComment",
+      "externalComment",
+      "incidentReport",
+      "assignedTo",
+    ];
+
+    // Filter out any fields that are not allowed
+    const validUpdates = {};
+    for (const [key, value] of Object.entries(updateData)) {
+      if (allowedFields.includes(key)) {
+        validUpdates[key] = value;
+      }
+    }
+
+    if (Object.keys(validUpdates).length === 0) {
+      return {
+        success: false,
+        message: 'No valid fields to update'
+      };
+    }
+
+    // Add UpdatedAt timestamp
+    validUpdates.UpdatedAt = new Date();
+
+    const result = await dataAccess.updateRideById(rideId, validUpdates);
+
+    if (result.success) {
+      return {
+        success: true,
+        message: 'Ride updated successfully',
+        ride: result.ride,
+        updatedFields: Object.keys(validUpdates)
+      };
+    } else {
+      return {
+        success: false,
+        message: result.error || 'Failed to update ride'
+      };
+    }
+  } catch (error) {
+    console.error('Error in updateRideById:', error);
+    return {
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    };
+  }
+}
+
 // Assign a driver to a ride
 async function assignDriverToRide(rideId, volunteerId) {
   try {
@@ -4167,7 +4292,8 @@ async function resetUserPassword(userID, newPassword, authToken) {
 module.exports = { 
   loginUser, 
   createRoleWithPermissions,
-  createPermissionForRole, 
+  createPermissionForRole,
+  updateRole, 
   getParentRole,
   getParentRoleView,
   verifyToken, 
@@ -4187,6 +4313,7 @@ module.exports = {
   getAllRidesAppointmentInfo,
   getRideByUID,
   updateRideByUID,
+  updateRideById,
   assignDriverToRide,
   parseDriverAvailability,
   parseRideDateTime,
