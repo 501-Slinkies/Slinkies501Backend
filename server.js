@@ -1461,8 +1461,22 @@ app.use("/api/reports", reportsRouter);
 // Delegate export logic to module in exports.js to keep server.js lean
 const exportsModule = require('./exports');
 
-app.post('/api/exports/prepare', exportsModule.verifyExportToken, exportsModule.ensureAdmin, exportsModule.prepareExport);
-app.get('/api/exports/:collection', exportsModule.verifyExportToken, exportsModule.ensureAdmin, exportsModule.getExport);
+// exports endpoint (POST) — default mode is 'stream'.
+app.post('/api/exports', async (req, res) => {
+  try {
+    let authToken = null;
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) authToken = authHeader.substring(7);
+
+    // mode can be provided in body: 'stream' (default) | 'url'
+    const mode = req.body && req.body.mode ? req.body.mode : 'stream';
+
+    await exportsModule.handleExport(req, res, authToken, mode);
+  } catch (err) {
+    console.error('Error in POST /api/exports route:', err);
+    res.status(500).json({ success: false, error: err.message || 'Internal server error' });
+  }
+});
 
 // ================================
 // Root Endpoint
