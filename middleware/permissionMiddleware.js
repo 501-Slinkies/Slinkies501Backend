@@ -36,25 +36,25 @@ function getResourceFromPath(path) {
     }
   }
   
-  // Map paths to resources
+  // Map paths to resources (using singular names to match permission schema)
   if (normalizedPath.startsWith('api/organizations')) {
     return 'org';
   } else if (normalizedPath.startsWith('api/clients')) {
-    return 'clients';
+    return 'client';
   } else if (normalizedPath.startsWith('api/rides') || 
              normalizedPath.startsWith('api/calendar') ||
              normalizedPath.startsWith('api/drivers')) {
-    return 'rides';
+    return 'ride';
   } else if (normalizedPath.startsWith('api/volunteers') || 
              normalizedPath.startsWith('api/users')) {
-    return 'volunteers';
+    return 'volunteer';
   } else if (normalizedPath.startsWith('api/roles')) {
-    return 'roles';
+    return 'role';
   } else if (normalizedPath.startsWith('api/reports') || 
              normalizedPath.startsWith('api/exports')) {
-    return 'logs'; // Reports and exports likely need read_logs permission
+    return 'log'; // Reports and exports likely need read_log permission
   } else if (normalizedPath.startsWith('api/permissions')) {
-    return 'roles'; // Permission management is part of role management
+    return 'role'; // Permission management is part of role management
   }
   
   // Unknown endpoint - return null to exclude but log it

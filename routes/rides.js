@@ -719,5 +719,164 @@ router.put("/uid/:rideUID", async (req, res) => {
   }
 });
 
+/**
+ * ============================================================================
+ * ✅ POST /api/rides/complete
+ * Complete multiple rides by setting status to "completed" and updating completion data
+ * 
+ * Request Body:
+ * {
+ *   "rideCompletions": "rideUID,milesDriven,volunteerHours,donationRecieved,donationAmount;rideUID,milesDriven,volunteerHours,donationRecieved,donationAmount;..."
+ * }
+ * 
+ * Format: Each ride completion is separated by semicolon (;)
+ * Each ride completion has 5 comma-separated values:
+ * - rideUID (required)
+ * - milesDriven (optional, can be empty)
+ * - volunteerHours (optional, can be empty)
+ * - donationRecieved (optional, can be empty)
+ * - donationAmount (optional, can be empty)
+ * 
+ * Example:
+ * "ride123,15.5,1.5,Cash,25.50;ride456,20.0,2.0,Check,30.00;ride789,,,None,0"
+ * 
+ * Response (200):
+ * {
+ *   "success": true,
+ *   "message": "Processed 3 ride(s). Completed: 3, Failed: 0",
+ *   "results": {
+ *     "completed": [
+ *       { "rideUID": "ride123", "success": true },
+ *       { "rideUID": "ride456", "success": true }
+ *     ],
+ *     "failed": [
+ *       { "rideUID": "ride789", "error": "Ride not found" }
+ *     ]
+ *   },
+ *   "totalProcessed": 3,
+ *   "totalCompleted": 3,
+ *   "totalFailed": 0
+ * }
+ * ============================================================================
+ */
+router.post("/complete", async (req, res) => {
+  try {
+    const { rideCompletions } = req.body;
+
+    // Validate required fields
+    if (!rideCompletions || typeof rideCompletions !== 'string') {
+      return res.status(400).json({
+        success: false,
+        message: "rideCompletions is required and must be a string",
+        format: "rideUID,milesDriven,volunteerHours,donationRecieved,donationAmount;rideUID,milesDriven,volunteerHours,donationRecieved,donationAmount;..."
+      });
+    }
+
+    // Parse the rideCompletions string
+    // Split by semicolon to get individual ride completions
+    const rideCompletionStrings = rideCompletions.split(';').filter(str => str.trim().length > 0);
+
+    if (rideCompletionStrings.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No ride completions found in rideCompletions string"
+      });
+    }
+
+    const results = {
+      completed: [],
+      failed: []
+    };
+
+    // Process each ride completion
+    for (const completionString of rideCompletionStrings) {
+      try {
+        // Split by comma to get the values
+        const parts = completionString.split(',').map(part => part.trim());
+        
+        if (parts.length < 1 || !parts[0]) {
+          results.failed.push({
+            rideUID: 'unknown',
+            error: 'Missing rideUID in completion string',
+            completionString: completionString
+          });
+          continue;
+        }
+
+        const rideUID = parts[0];
+        const milesDriven = parts[1] !== undefined && parts[1] !== '' ? parseFloat(parts[1]) : null;
+        const volunteerHours = parts[2] !== undefined && parts[2] !== '' ? parseFloat(parts[2]) : null;
+        const donationRecieved = parts[3] !== undefined && parts[3] !== '' ? parts[3] : null;
+        const donationAmount = parts[4] !== undefined && parts[4] !== '' ? parseFloat(parts[4]) : null;
+
+        // Build update data object with status set to "completed"
+        const updateData = {
+          status: "completed"
+        };
+
+        // Add optional fields if provided
+        if (milesDriven !== null && !isNaN(milesDriven)) {
+          updateData.milesDriven = milesDriven;
+        }
+        if (volunteerHours !== null && !isNaN(volunteerHours)) {
+          updateData.volunteerHours = volunteerHours;
+        }
+        if (donationRecieved !== null) {
+          updateData.donationReceived = donationRecieved;
+        }
+        if (donationAmount !== null && !isNaN(donationAmount)) {
+          updateData.donationAmount = donationAmount;
+        }
+
+        // Update the ride by UID
+        const result = await applicationLayer.updateRideByUID(rideUID, updateData);
+
+        if (result.success) {
+          results.completed.push({
+            rideUID: rideUID,
+            success: true,
+            updatedFields: result.updatedFields
+          });
+        } else {
+          results.failed.push({
+            rideUID: rideUID,
+            error: result.message || result.error || "Failed to update ride"
+          });
+        }
+      } catch (error) {
+        console.error(`Error processing ride completion: ${completionString}`, error);
+        results.failed.push({
+          rideUID: 'unknown',
+          error: error.message || "Error processing ride completion",
+          completionString: completionString
+        });
+      }
+    }
+
+    // Determine overall success
+    const totalProcessed = rideCompletionStrings.length;
+    const totalCompleted = results.completed.length;
+    const totalFailed = results.failed.length;
+    const overallSuccess = totalFailed === 0 || totalCompleted > 0;
+
+    res.status(overallSuccess ? 200 : 207).json({
+      success: overallSuccess,
+      message: `Processed ${totalProcessed} ride(s). Completed: ${totalCompleted}, Failed: ${totalFailed}`,
+      results: results,
+      totalProcessed: totalProcessed,
+      totalCompleted: totalCompleted,
+      totalFailed: totalFailed
+    });
+
+  } catch (error) {
+    console.error("🔥 Error in POST /api/rides/complete endpoint:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error completing rides.",
+      error: error.message
+    });
+  }
+});
+
 
 module.exports = router;
