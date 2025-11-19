@@ -1,12 +1,17 @@
 const { db } = require('./firebase');
 const applicationLayer = require('./ApplicationLayer');
-const { Parser, Transform } = require('json2csv');
+// We only need the streaming Transform from json2csv; Parser (single-shot) is unused.
+const { Transform } = require('json2csv');
 const PDFDocument = require('pdfkit');
 const AuditLogger = require('./AuditLogger');
-const { getClientIp, getUserAgent } = require('./middleware/securityMiddleware');
 const DAL = require('./DataAccessLayer');
 
-// Helper: verify token and return normalized user
+/**
+ * Extract and verify an authorization token and return a normalized user object.
+ * Throws an error-like object {status, message} on failure for upstream handlers to return HTTP responses.
+ * Input: authToken (string)
+ * Output: { ...user, org, userId }
+ */
 async function getUserFromToken(authToken) {
     if (!authToken) throw { status: 401, message: 'Authorization token required' };
     
@@ -25,7 +30,12 @@ async function getUserFromToken(authToken) {
     };
 }
 
-// Helper: assert the given user is an admin
+/**
+ * Verify that the provided user (from token) is an administrator volunteer.
+ * Uses the DAL to locate a volunteer/user record and ensures the role includes
+ * 'role_1:{default_admin}' and organization matches the token's org.
+ * Throws {status, message} on failure.
+ */
 async function assertAdmin(user) {
     const userId = user && (user.userId || user.uid || user.id || user.user_ID);
     if (!userId) throw { status: 403, message: 'Admin check failed: user id not found' };
@@ -59,10 +69,13 @@ async function assertAdmin(user) {
     return volunteer;
 }
 
-// Data fetching logic
+/**
+ * Eager fetch helper: retrieve all documents for a collection matching an organization.
+ * This is used only for PDF generation and a small number of callers where an
+ * in-memory array is acceptable. For large exports prefer fetchDocumentsPaginated.
+ * Returns an array of { id, ...data } or [] when no docs.
+ */
 async function fetchDataFromFirestore(collection, effectiveOrg) {
-    // NOTE: This function is kept for backward compatibility but
-    // the new streaming export uses paginated reader below.
     const collRef = db.collection(collection);
     
     // Try standard organization fields
@@ -83,7 +96,11 @@ async function fetchDataFromFirestore(collection, effectiveOrg) {
     return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 }
 
-// Determine which organization field exists for a collection
+/**
+ * Heuristic: determine which organization field a collection uses so queries can be built.
+ * Checks common field names (organization, organization_id, organizationId, org_id)
+ * and returns the first that yields a hit. Falls back to 'organization'.
+ */
 async function determineOrgField(collection, effectiveOrg) {
     const collRef = db.collection(collection);
     const checks = ['organization', 'organization_id', 'organizationId', 'org_id'];
@@ -99,7 +116,15 @@ async function determineOrgField(collection, effectiveOrg) {
     return 'organization';
 }
 
-// Async generator to paginate documents for a collection filtered by org and optional filters
+/**
+ * Async generator that yields documents from Firestore in pages.
+ * Usage: for await (const doc of fetchDocumentsPaginated(...)) { ... }
+ * This avoids buffering the full result set in memory and is the preferred
+ * method for streaming large exports to clients.
+ *
+ * `filters` is currently unused (placeholder) but will be used when filter
+ * parameters (dateFrom/dateTo/driverId/etc.) are implemented.
+ */
 async function* fetchDocumentsPaginated(collection, effectiveOrg, filters = {}, pageSize = 500) {
     const collRef = db.collection(collection);
     const orgField = await determineOrgField(collection, effectiveOrg);
@@ -125,10 +150,16 @@ async function* fetchDocumentsPaginated(collection, effectiveOrg, filters = {}, 
     }
 }
 
-// Field filtering logic
+/**
+ * Filter an array of objects to only include the specified fields.
+ * `fields` may be a comma-separated string ("a,b,c") or an array ["a","b"].
+ * Returns a new array with each object reduced to the listed keys.
+ */
 function filterDataByFields(data, fields) {
     if (!fields) return data;
-    const fieldList = fields.split(',').map(f => f.trim());
+    const fieldList = Array.isArray(fields)
+        ? fields.map(f => String(f).trim()).filter(Boolean)
+        : String(fields).split(',').map(f => f.trim()).filter(Boolean);
     return data.map(item => {
         const filtered = {};
         fieldList.forEach(field => {
@@ -138,7 +169,12 @@ function filterDataByFields(data, fields) {
     });
 }
 
-// PDF generation helper
+/**
+ * Generate a PDF document from an array of records and stream it to `res`.
+ * This is primarily intended for relatively small datasets or summary reports.
+ * For very large datasets consider generating CSV/XLSX instead or streaming
+ * PDF generation (not implemented here).
+ */
 function generatePdfDoc(data, collection, res) {
     const doc = new PDFDocument({ margin: 50 });
     doc.pipe(res); // Stream directly to response
@@ -176,7 +212,14 @@ function generatePdfDoc(data, collection, res) {
     doc.end();
 }
 
-// --- MAIN EXPORT HANDLER (Stream Only) ---
+/**
+ * Main export handler. Expected to be wired as an Express route handler.
+ * Behavior:
+ *  - Authenticates the request via bearer token and enforces admin role.
+ *  - Supports `format=csv` (streamed, paginated) and `format=pdf` (eager).
+ *  - Supports optional `fields` parameter for selecting columns.
+ *  - Streams CSV via json2csv Transform to avoid buffering large exports.
+ */
 async function handleExport(req, res) {
     let user;
     try {
