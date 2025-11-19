@@ -4,6 +4,7 @@ const express = require("express");
 const router = express.Router();
 const { db } = require("../firebase");
 const dataAccess = require("../DataAccessLayer");
+const applicationLayer = require("../ApplicationLayer");
 
 /**
  * ✅ GET /api/rides/calendar
@@ -139,6 +140,103 @@ router.get("/calendar", async (req, res) => {
   } catch (err) {
     console.error("🔥 Error GET /api/rides/calendar:", err);
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * ============================================================================
+ * ✅ POST /api/rides
+ * Creates a new ride request
+ * 
+ * Body: {
+ *   "UID": "unique-ride-id" (optional - will be auto-generated if not provided),
+ *   "clientUID": "client123" (required),
+ *   "Date": "2025-01-15" or Date object (required),
+ *   "appointmentTime": "2025-01-15T10:00:00Z" or Date object (required),
+ *   "appointment_type": "Medical" (required),
+ *   "purpose": "Doctor appointment" (required),
+ *   "status": "Scheduled" (optional, defaults to "Scheduled"),
+ *   "tripType": "RoundTrip" (optional, defaults to "RoundTrip"),
+ *   "recurring": "Weekly" (optional, must be one of: Weekly, Bi-Weekly, Monthly, Bi-Monthly, Yearly, Bi-Yearly),
+ *   "recurringEndDate": "2025-07-15" (optional, ISO date string - when to stop generating recurring instances, defaults to 6 months),
+ *   "recurringCount": 10 (optional, number of instances to create - alternative to recurringEndDate),
+ *   "driverUID": "driver123" (optional),
+ *   "dispatcherUID": "dispatcher123" (optional),
+ *   "destinationUID": "destination123" (optional),
+ *   "organization": "org123" (optional),
+ *   "pickupTime": "09:00 AM" (optional),
+ *   "estimatedDuration": 60 (optional, in minutes),
+ *   ... (other optional fields)
+ * }
+ * 
+ * Note: When recurring is set, the system will automatically generate future ride instances
+ * up to the recurringEndDate (or 6 months default) or for the specified recurringCount.
+ * Each instance will have a unique UID and be linked to the parent ride via parentRideUID.
+ * ============================================================================
+ */
+router.post("/", async (req, res) => {
+  try {
+    const rideData = req.body;
+
+    // Generate UID if not provided
+    if (!rideData.UID) {
+      // Generate a unique ID (using timestamp + random string)
+      rideData.UID = `ride_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    }
+
+    // Validate recurring field if provided
+    if (rideData.recurring !== undefined && rideData.recurring !== null) {
+      const validRecurringValues = ['Weekly', 'Bi-Weekly', 'Monthly', 'Bi-Monthly', 'Yearly', 'Bi-Yearly'];
+      if (!validRecurringValues.includes(rideData.recurring)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid recurring value. Must be one of: ${validRecurringValues.join(', ')}`,
+          error: `Provided value: ${rideData.recurring}`
+        });
+      }
+    }
+
+    // Call the application layer to create the ride
+    const result = await applicationLayer.createRide(rideData);
+
+    if (result.success) {
+      const response = {
+        success: true,
+        message: result.message || "Ride created successfully",
+        ride: result.ride
+      };
+      
+      // Include recurring instances info if present
+      if (result.recurringInstances && result.recurringInstances.length > 0) {
+        response.recurringInstances = result.recurringInstances;
+        response.totalRidesCreated = result.totalRidesCreated;
+      }
+      
+      res.status(201).json(response);
+    } else {
+      // Determine appropriate status code
+      let statusCode = 400;
+      if (result.message && result.message.includes("already exists")) {
+        statusCode = 409; // Conflict
+      } else if (result.message && result.message.includes("Missing required")) {
+        statusCode = 400; // Bad Request
+      } else {
+        statusCode = 500; // Internal Server Error
+      }
+
+      res.status(statusCode).json({
+        success: false,
+        message: result.message || "Failed to create ride",
+        error: result.error
+      });
+    }
+  } catch (error) {
+    console.error("🔥 Error in POST /api/rides endpoint:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error creating ride.",
+      error: error.message
+    });
   }
 });
 
@@ -447,6 +545,175 @@ router.post("/by-driver", async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Server error fetching rides by driver.",
+      error: error.message
+    });
+  }
+});
+
+/**
+ * ============================================================================
+ * ✅ PUT /api/rides/:rideId
+ * Update a ride by document ID
+ * 
+ * Path Parameters:
+ * - rideId - The ride document ID
+ * 
+ * Request Body (any of the following fields):
+ * {
+ *   "clientUID": "client123",
+ *   "additionalClient1_name": "John Doe",
+ *   "additionalClient1_rel": "Father",
+ *   "driverUID": "driver123",
+ *   "dispatcherUID": "dispatcher123",
+ *   "startLocation": "123 Main St",
+ *   "destinationUID": "destination123",
+ *   "Date": "2025-01-15",
+ *   "appointmentTime": "2025-01-15T10:00:00Z",
+ *   "appointment_type": "Medical",
+ *   "pickupTme": "09:00 AM",
+ *   "estimatedDuration": 60,
+ *   "purpose": "Doctor appointment",
+ *   "tripType": "RoundTrip",
+ *   "status": "Scheduled",
+ *   "wheelchair": false,
+ *   "wheelchairType": "Manual",
+ *   "milesDriven": 15,
+ *   "volunteerHours": 1.5,
+ *   "donationReceived": "Cash",
+ *   "donationAmount": 25.50,
+ *   "confirmation1_Date": "2025-01-14T10:00:00Z",
+ *   "confirmation1_By": "dispatcher123",
+ *   "confirmation2_Date": "2025-01-14T14:00:00Z",
+ *   "confirmation2_By": "client123",
+ *   "internalComment": "Internal note",
+ *   "externalComment": "External note",
+ *   "incidentReport": "No incidents",
+ *   "assignedTo": "driver123"
+ * }
+ * 
+ * Response (200):
+ * {
+ *   "success": true,
+ *   "message": "Ride updated successfully",
+ *   "ride": { ... },
+ *   "updatedFields": ["status", "driverUID"]
+ * }
+ * ============================================================================
+ */
+router.put("/:rideId", async (req, res) => {
+  try {
+    const { rideId } = req.params;
+    const updateData = req.body;
+
+    // Validate required fields
+    if (!rideId) {
+      return res.status(400).json({
+        success: false,
+        message: "Ride ID is required"
+      });
+    }
+
+    // Update the ride
+    const result = await applicationLayer.updateRideById(rideId, updateData);
+
+    if (result.success) {
+      res.status(200).json({
+        success: true,
+        message: result.message,
+        ride: result.ride,
+        updatedFields: result.updatedFields
+      });
+    } else {
+      // Determine appropriate status code
+      let statusCode = 400;
+      if (result.message && result.message.includes("not found")) {
+        statusCode = 404; // Not Found
+      } else if (result.message && result.message.includes("No valid fields")) {
+        statusCode = 400; // Bad Request
+      } else {
+        statusCode = 500; // Internal Server Error
+      }
+
+      res.status(statusCode).json({
+        success: false,
+        message: result.message || "Failed to update ride",
+        error: result.error
+      });
+    }
+  } catch (error) {
+    console.error("🔥 Error in PUT /api/rides/:rideId endpoint:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error updating ride.",
+      error: error.message
+    });
+  }
+});
+
+/**
+ * ============================================================================
+ * ✅ PUT /api/rides/uid/:rideUID
+ * Update a ride by UID
+ * 
+ * Path Parameters:
+ * - rideUID - The ride UID (unique identifier field)
+ * 
+ * Request Body: Same as PUT /api/rides/:rideId
+ * 
+ * Response (200):
+ * {
+ *   "success": true,
+ *   "message": "Ride updated successfully",
+ *   "ride": { ... },
+ *   "updatedFields": ["status", "driverUID"]
+ * }
+ * ============================================================================
+ */
+router.put("/uid/:rideUID", async (req, res) => {
+  try {
+    const { rideUID } = req.params;
+    const updateData = req.body;
+
+    // Validate required fields
+    if (!rideUID) {
+      return res.status(400).json({
+        success: false,
+        message: "Ride UID is required"
+      });
+    }
+
+    // Update the ride
+    const result = await applicationLayer.updateRideByUID(rideUID, updateData);
+
+    if (result.success) {
+      res.status(200).json({
+        success: true,
+        message: result.message,
+        ride: result.ride,
+        updatedFields: result.updatedFields
+      });
+    } else {
+      // Determine appropriate status code
+      let statusCode = 400;
+      if (result.message && result.message.includes("not found")) {
+        statusCode = 404; // Not Found
+      } else if (result.message && result.message.includes("No valid fields")) {
+        statusCode = 400; // Bad Request
+      } else {
+        statusCode = 500; // Internal Server Error
+      }
+
+      res.status(statusCode).json({
+        success: false,
+        message: result.message || "Failed to update ride",
+        error: result.error
+      });
+    }
+  } catch (error) {
+    console.error("🔥 Error in PUT /api/rides/uid/:rideUID endpoint:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error updating ride.",
       error: error.message
     });
   }

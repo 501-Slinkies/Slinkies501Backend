@@ -633,11 +633,21 @@ app.post('/api/organizations', async (req, res) => {
         success: true
       });
 
-      res.status(201).send({
+      const response = {
         success: true,
         message: result.message,
         data: result.data
-      });
+      };
+      
+      // Include volunteer creation details if present
+      if (result.data.createdVolunteers && result.data.createdVolunteers.length > 0) {
+        response.data.volunteers = result.data.createdVolunteers;
+      }
+      if (result.data.volunteerErrors) {
+        response.data.volunteerErrors = result.data.volunteerErrors;
+      }
+      
+      res.status(201).send(response);
     } else {
       // Log failed organization creation attempt
       await auditLogger.logAccess({
@@ -1088,6 +1098,105 @@ app.get('/api/roles/:roleName/parent/view', async (req, res) => {
   } catch (error) {
     console.error('Error in GET /api/roles/:roleName/parent/view endpoint:', error);
     return res.status(500).send({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+});
+
+// Update role endpoint
+app.put('/api/roles/:roleName', async (req, res) => {
+  try {
+    const auditLogger = require('./AuditLogger');
+    const { getClientIp, getUserAgent } = require('./middleware/securityMiddleware');
+    
+    // Extract the roleName from URL parameters
+    const { roleName } = req.params;
+    
+    // Extract authentication token if provided (optional for now, required in production)
+    let authToken = null;
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      authToken = authHeader.substring(7);
+    }
+
+    // Extract update data from request body
+    const updateData = req.body;
+
+    // Update the role
+    const result = await applicationLayer.updateRole(roleName, updateData, authToken);
+
+    // Log the update attempt
+    const ipAddress = getClientIp ? getClientIp(req) : req.ip;
+    const userAgent = getUserAgent ? getUserAgent(req) : req.get('user-agent');
+    
+    if (result.success) {
+      // Log successful role update
+      await auditLogger.logAccess({
+        userId: authToken ? 'authenticated' : 'unknown',
+        userEmail: 'unknown',
+        userRole: 'unknown',
+        organizationId: result.role?.org_id || 'N/A',
+        action: 'UPDATE',
+        resourceType: 'role',
+        resourceId: roleName,
+        ipAddress: ipAddress,
+        userAgent: userAgent,
+        success: true
+      });
+
+      const response = {
+        success: true,
+        message: result.message,
+        role: result.role
+      };
+
+      // Include rename information if the role was renamed
+      if (result.renamed !== undefined) {
+        response.renamed = result.renamed;
+        if (result.renamed && result.oldId && result.newId) {
+          response.oldId = result.oldId;
+          response.newId = result.newId;
+        }
+      }
+
+      res.status(200).send(response);
+    } else {
+      // Log failed update attempt
+      await auditLogger.logAccess({
+        userId: 'unknown',
+        userEmail: 'unknown',
+        userRole: 'unknown',
+        organizationId: 'N/A',
+        action: 'UPDATE',
+        resourceType: 'role',
+        resourceId: roleName,
+        ipAddress: ipAddress,
+        userAgent: userAgent,
+        success: false,
+        failureReason: result.message
+      });
+
+      // Determine appropriate status code
+      let statusCode = 400;
+      if (result.message && result.message.includes('not found')) {
+        statusCode = 404; // Not Found
+      } else if (result.message && result.message.includes('authentication')) {
+        statusCode = 401; // Unauthorized
+      } else if (result.message && result.message.includes('already exists')) {
+        statusCode = 409; // Conflict
+      }
+
+      res.status(statusCode).send({
+        success: false,
+        message: result.message,
+        error: result.error
+      });
+    }
+  } catch (error) {
+    console.error('Error in PUT /api/roles/:roleName endpoint:', error);
+    res.status(500).send({
       success: false,
       message: 'Internal server error',
       error: error.message
