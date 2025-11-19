@@ -252,6 +252,17 @@ async function handleExport(req, res) {
         // user = await getUserFromToken(token);
         // await assertAdmin(user);
 
+        // Temporary dev fallback: if auth is disabled and `user` is undefined,
+        // provide a placeholder user so downstream code (org scoping, audit)
+        // doesn't crash. You can pass ?org=yourOrg or { "org": "yourOrg" }
+        // in the request body to scope results during development.
+        if (!user) {
+            user = {
+                userId: 'dev-user',
+                org: req.query.org || (req.body && req.body.org) || 'bripen'
+            };
+        }
+
         const { collection } = req.params;
         const { format = 'csv', fields } = (req.body && Object.keys(req.body).length ? req.body : req.query);
         const effectiveOrg = user.org;
