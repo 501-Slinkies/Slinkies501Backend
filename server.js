@@ -129,27 +129,27 @@ app.post('/api/permissions', async (req, res) => {
         message: 'Role name is required',
         required_fields: {
           roleName: 'string - name of the role to attach permissions to',
-          create_clients: 'boolean (optional)',
-          read_clients: 'boolean (optional)',
-          update_clients: 'boolean (optional)',
-          delete_clients: 'boolean (optional)',
-          create_org: 'boolean (optional)',
-          read_org: 'boolean (optional)',
-          update_org: 'boolean (optional)',
-          delete_org: 'boolean (optional)',
-          create_rides: 'boolean (optional)',
-          read_rides: 'boolean (optional)',
-          update_rides: 'boolean (optional)',
-          delete_rides: 'boolean (optional)',
-          create_roles: 'boolean (optional)',
-          read_roles: 'boolean (optional)',
-          update_roles: 'boolean (optional)',
-          delete_roles: 'boolean (optional)',
-          create_volunteers: 'boolean (optional)',
-          read_volunteers: 'boolean (optional)',
-          update_volunteers: 'boolean (optional)',
-          delete_volunteers: 'boolean (optional)',
-          read_logs: 'boolean (optional)'
+          create_client: 'boolean (optional, defaults to false)',
+          read_client: 'boolean (optional, defaults to false)',
+          update_client: 'boolean (optional, defaults to false)',
+          delete_client: 'boolean (optional, defaults to false)',
+          create_org: 'boolean (optional, defaults to false)',
+          read_org: 'boolean (optional, defaults to false)',
+          update_org: 'boolean (optional, defaults to false)',
+          delete_org: 'boolean (optional, defaults to false)',
+          create_ride: 'boolean (optional, defaults to false)',
+          read_ride: 'boolean (optional, defaults to false)',
+          update_ride: 'boolean (optional, defaults to false)',
+          delete_ride: 'boolean (optional, defaults to false)',
+          create_role: 'boolean (optional, defaults to false)',
+          read_role: 'boolean (optional, defaults to false)',
+          update_role: 'boolean (optional, defaults to false)',
+          delete_role: 'boolean (optional, defaults to false)',
+          create_volunteer: 'boolean (optional, defaults to false)',
+          read_volunteer: 'boolean (optional, defaults to false)',
+          update_volunteer: 'boolean (optional, defaults to false)',
+          delete_volunteer: 'boolean (optional, defaults to false)',
+          read_log: 'boolean (optional, defaults to false)'
         }
       });
     }
@@ -170,6 +170,68 @@ app.post('/api/permissions', async (req, res) => {
     }
   } catch (error) {
     console.error('Error in /permissions endpoint:', error);
+    res.status(500).send({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+});
+
+// Update permissions for a role
+app.put('/api/permissions', async (req, res) => {
+  try {
+    // Extract permission data from request body
+    const { roleName, ...permissionBooleans } = req.body;
+    
+    // Validate required fields
+    if (!roleName) {
+      return res.status(400).send({
+        success: false,
+        message: 'Role name is required',
+        required_fields: {
+          roleName: 'string - name of the role to update permissions for',
+          create_client: 'boolean (optional)',
+          read_client: 'boolean (optional)',
+          update_client: 'boolean (optional)',
+          delete_client: 'boolean (optional)',
+          create_org: 'boolean (optional)',
+          read_org: 'boolean (optional)',
+          update_org: 'boolean (optional)',
+          delete_org: 'boolean (optional)',
+          create_ride: 'boolean (optional)',
+          read_ride: 'boolean (optional)',
+          update_ride: 'boolean (optional)',
+          delete_ride: 'boolean (optional)',
+          create_role: 'boolean (optional)',
+          read_role: 'boolean (optional)',
+          update_role: 'boolean (optional)',
+          delete_role: 'boolean (optional)',
+          create_volunteer: 'boolean (optional)',
+          read_volunteer: 'boolean (optional)',
+          update_volunteer: 'boolean (optional)',
+          delete_volunteer: 'boolean (optional)',
+          read_log: 'boolean (optional)'
+        }
+      });
+    }
+
+    // Update permission document and update role with reference - no token checking
+    const result = await applicationLayer.updatePermissionForRole(roleName, permissionBooleans, null);
+    
+    if (result.success) {
+      res.status(200).send(result);
+    } else {
+      // Determine appropriate status code based on error type
+      let statusCode = 500; // Default to internal server error
+      if (result.message && (result.message.includes('required') || result.message.includes('not found'))) {
+        statusCode = 400;
+      }
+      
+      res.status(statusCode).send(result);
+    }
+  } catch (error) {
+    console.error('Error in PUT /permissions endpoint:', error);
     res.status(500).send({
       success: false,
       message: 'Internal server error',

@@ -107,10 +107,11 @@ async function getParentRole(roleName) {
     }
 
     const role = roleResult.role || {};
+    // Return only the parentRole field
+    const parentRole = role.parentRole || role.parent_role || null;
     return {
       success: true,
-      role: role.name || role.id || roleName.trim(),
-      parent_role: role.parent_role || null
+      parentRole: parentRole
     };
   } catch (error) {
     console.error('Error fetching parent role:', error);
@@ -271,6 +272,55 @@ async function createPermissionForRole(roleName, permissionData, authToken) {
   }
 }
 
+async function updatePermissionForRole(roleName, permissionData, authToken) {
+  try {
+    // Token checking disabled for now - skip authentication
+    // if (authToken) {
+    //   const tokenVerification = verifyToken(authToken);
+    //   if (!tokenVerification.success) {
+    //     return { success: false, message: 'Authentication failed' };
+    //   }
+    // }
+
+    // Validate required fields
+    if (!roleName || typeof roleName !== 'string' || roleName.trim() === '') {
+      return { success: false, message: 'Role name is required' };
+    }
+
+    if (!permissionData || typeof permissionData !== 'object') {
+      return { success: false, message: 'Permission data is required' };
+    }
+
+    // Update permission document and update role with reference
+    const result = await dataAccess.updatePermissionAndUpdateRole(roleName, permissionData);
+
+    if (result.success) {
+      return {
+        success: true,
+        message: 'Permission updated and role updated successfully',
+        data: {
+          permissionId: result.permissionId,
+          roleName: result.roleName,
+          roleCollection: result.roleCollection
+        }
+      };
+    } else {
+      return {
+        success: false,
+        message: 'Failed to update permission and update role',
+        error: result.error
+      };
+    }
+  } catch (error) {
+    console.error('Error in updatePermissionForRole:', error);
+    return {
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    };
+  }
+}
+
 async function updateRole(roleName, updateData, authToken) {
   try {
     // Token checking disabled for now - skip authentication
@@ -288,6 +338,35 @@ async function updateRole(roleName, updateData, authToken) {
 
     if (!updateData || typeof updateData !== 'object') {
       return { success: false, message: 'Update data is required' };
+    }
+
+    // Check if trying to set org_id to 'default' in update data
+    if (updateData.org_id === 'default') {
+      return { 
+        success: false, 
+        message: 'Cannot edit roles with org_id of "default". Roles with org_id "default" are protected and cannot be modified.',
+        error: 'PROTECTED_ROLE_ORG_ID'
+      };
+    }
+
+    // Get the existing role to check its org_id
+    const existingRoleResult = await dataAccess.getRoleByName(roleName);
+    if (!existingRoleResult.success) {
+      return { 
+        success: false, 
+        message: existingRoleResult.error || 'Role not found',
+        error: existingRoleResult.error
+      };
+    }
+
+    // Check if the existing role has org_id of 'default'
+    const existingRole = existingRoleResult.role;
+    if (existingRole && existingRole.org_id === 'default') {
+      return { 
+        success: false, 
+        message: 'Cannot edit roles with org_id of "default". Roles with org_id "default" are protected and cannot be modified.',
+        error: 'PROTECTED_ROLE_ORG_ID'
+      };
     }
 
     // Update role document
@@ -3409,6 +3488,12 @@ async function updateRideByUID(uid, updateData) {
       "externalComment",
       "incidentReport",
       "assignedTo",
+      // Recurring ride fields - allow updating on parent rides
+      "recurring",
+      "recurringEndDate",
+      "recurringCount",
+      // Note: isRecurringInstance, parentRideUID, and recurringInstanceNumber 
+      // are managed by the system and should not be manually updated
     ];
 
     // Filter out any fields that are not allowed
@@ -3488,6 +3573,12 @@ async function updateRideById(rideId, updateData) {
       "externalComment",
       "incidentReport",
       "assignedTo",
+      // Recurring ride fields - allow updating on parent rides
+      "recurring",
+      "recurringEndDate",
+      "recurringCount",
+      // Note: isRecurringInstance, parentRideUID, and recurringInstanceNumber 
+      // are managed by the system and should not be manually updated
     ];
 
     // Filter out any fields that are not allowed
@@ -4304,6 +4395,7 @@ module.exports = {
   loginUser, 
   createRoleWithPermissions,
   createPermissionForRole,
+  updatePermissionForRole,
   updateRole, 
   getParentRole,
   getParentRoleView,
