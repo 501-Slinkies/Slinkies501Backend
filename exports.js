@@ -254,8 +254,8 @@ async function handleExport(req, res) {
 
         // Temporary dev fallback: if auth is disabled and `user` is undefined,
         // provide a placeholder user so downstream code (org scoping, audit)
-        // doesn't crash. You can pass ?org=yourOrg or { "org": "yourOrg" }
-        // in the request body to scope results during development.
+        // doesn't crash. You can pass { "org": "yourOrg" } in the request
+        // body to scope results during development.
         if (!user) {
             user = {
                 userId: 'dev-user',
@@ -263,7 +263,8 @@ async function handleExport(req, res) {
             };
         }
 
-        const { collection } = req.params;
+        // Collection must be provided in the request body for clarity.
+        const collection = (req.body && req.body.collection) || null;
         const { format = 'csv', fields } = (req.body && Object.keys(req.body).length ? req.body : req.query);
         const effectiveOrg = user.org;
 
