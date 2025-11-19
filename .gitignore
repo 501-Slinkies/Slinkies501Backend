@@ -1,6 +1,6 @@
 .idx/
 *.log
 node_modules
-serviceAccountKey.json
+./serviceAccountKey.json
 .env
 docs
