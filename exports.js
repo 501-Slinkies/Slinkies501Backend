@@ -83,16 +83,26 @@ async function fetchDataFromFirestore(collection, effectiveOrg) {
     if (snapshot.empty) snapshot = await collRef.where('organization_id', '==', effectiveOrg).get();
     if (snapshot.empty) snapshot = await collRef.where('organizationId', '==', effectiveOrg).get();
     
-    // Special handling for 'organizations' collection
+    // Also try 'org_id' explicitly
+    if (snapshot.empty) snapshot = await collRef.where('org_id', '==', effectiveOrg).get();
+
+    // Special handling for 'organizations' collection: allow fetching by doc id
     if (snapshot.empty && collection === 'organizations') {
-        snapshot = await collRef.where('org_id', '==', effectiveOrg).get();
-        if (snapshot.empty) {
-            const doc = await collRef.doc(effectiveOrg).get();
-            if (doc.exists) return [{ id: doc.id, ...doc.data() }];
+        const doc = await collRef.doc(effectiveOrg).get();
+        if (doc.exists) return [{ id: doc.id, ...doc.data() }];
+    }
+
+    // If no org-like field matched, fall back to returning a limited unfiltered sample
+    if (snapshot.empty) {
+        try {
+            const sample = await collRef.limit(1000).get();
+            if (sample.empty) return [];
+            return sample.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        } catch (e) {
+            return [];
         }
     }
 
-    if (snapshot.empty) return [];
     return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 }
 
@@ -112,8 +122,10 @@ async function determineOrgField(collection, effectiveOrg) {
             // ignore and try next
         }
     }
-    // Fallback: return 'organization' by default (query will just return empty)
-    return 'organization';
+    // No organization-like field detected for this collection.
+    // Return null which signals callers to perform an unfiltered query
+    // for collections that don't include organization in their documents.
+    return null;
 }
 
 /**
@@ -129,7 +141,13 @@ async function* fetchDocumentsPaginated(collection, effectiveOrg, filters = {}, 
     const collRef = db.collection(collection);
     const orgField = await determineOrgField(collection, effectiveOrg);
 
-    let query = collRef.where(orgField, '==', effectiveOrg).limit(pageSize);
+    // Build query: if no orgField was detected, do an unfiltered query for this collection.
+    let query;
+    if (orgField) {
+        query = collRef.where(orgField, '==', effectiveOrg).limit(pageSize);
+    } else {
+        query = collRef.limit(pageSize);
+    }
     let lastSnapshot = null;
     while (true) {
         let snapshot;
@@ -268,7 +286,11 @@ async function handleExport(req, res) {
         const { format = 'csv', fields } = (req.body && Object.keys(req.body).length ? req.body : req.query);
         const effectiveOrg = user.org;
 
-        const allowedCollections = ['clients', 'volunteers', 'rides', 'destination', 'mileage_logs', 'audit_logs'];
+        // Collections allowed for export (include singular/plural variants observed in schema)
+        const allowedCollections = [
+            'clients', 'volunteers', 'rides', 'destination', 'destinations',
+            'mileage_logs', 'audit_log', 'audit_logs', 'calllogs', 'roles', 'organizations'
+        ];
         if (!allowedCollections.includes(collection)) {
             return res.status(400).json({ success: false, error: `Invalid collection.` });
         }
