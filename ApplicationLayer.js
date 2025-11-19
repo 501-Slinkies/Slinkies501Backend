@@ -271,6 +271,63 @@ async function createPermissionForRole(roleName, permissionData, authToken) {
   }
 }
 
+async function updateRole(roleName, updateData, authToken) {
+  try {
+    // Token checking disabled for now - skip authentication
+    // if (authToken) {
+    //   const tokenVerification = verifyToken(authToken);
+    //   if (!tokenVerification.success) {
+    //     return { success: false, message: 'Authentication failed' };
+    //   }
+    // }
+
+    // Validate required fields
+    if (!roleName || typeof roleName !== 'string' || roleName.trim() === '') {
+      return { success: false, message: 'Role name is required' };
+    }
+
+    if (!updateData || typeof updateData !== 'object') {
+      return { success: false, message: 'Update data is required' };
+    }
+
+    // Update role document
+    const result = await dataAccess.updateRole(roleName, updateData);
+
+    if (result.success) {
+      const response = {
+        success: true,
+        message: 'Role updated successfully',
+        role: result.role,
+        collection: result.collection
+      };
+
+      // Include rename information if the role was renamed
+      if (result.renamed) {
+        response.renamed = true;
+        response.oldId = result.oldId;
+        response.newId = result.newId;
+      } else {
+        response.renamed = false;
+      }
+
+      return response;
+    } else {
+      return {
+        success: false,
+        message: result.error || 'Failed to update role',
+        error: result.error
+      };
+    }
+  } catch (error) {
+    console.error('Error in updateRole:', error);
+    return {
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    };
+  }
+}
+
 // Helper function to parse day abbreviation to day name
 function parseDayAbbreviation(dayAbbr) {
   const dayMap = {
@@ -3029,6 +3086,109 @@ async function getRideAppointmentInfo(uid) {
 }
 
 // Create a new ride
+/**
+ * Calculate the next date based on recurring pattern
+ * @param {Date} startDate - The starting date
+ * @param {string} recurring - The recurring pattern (Weekly, Bi-Weekly, etc.)
+ * @param {number} occurrenceNumber - Which occurrence (1 = first, 2 = second, etc.)
+ * @returns {Date} The calculated next date
+ */
+function calculateNextRecurringDate(startDate, recurring, occurrenceNumber = 1) {
+  const date = new Date(startDate);
+  
+  switch (recurring) {
+    case 'Weekly':
+      date.setDate(date.getDate() + (7 * occurrenceNumber));
+      break;
+    case 'Bi-Weekly':
+      date.setDate(date.getDate() + (14 * occurrenceNumber));
+      break;
+    case 'Monthly':
+      date.setMonth(date.getMonth() + (1 * occurrenceNumber));
+      break;
+    case 'Bi-Monthly':
+      date.setMonth(date.getMonth() + (2 * occurrenceNumber));
+      break;
+    case 'Yearly':
+      date.setFullYear(date.getFullYear() + (1 * occurrenceNumber));
+      break;
+    case 'Bi-Yearly':
+      date.setFullYear(date.getFullYear() + (2 * occurrenceNumber));
+      break;
+    default:
+      return null;
+  }
+  
+  return date;
+}
+
+/**
+ * Generate future ride instances for a recurring ride
+ * @param {Object} originalRide - The original ride data
+ * @param {Date} recurringEndDate - When to stop generating rides (default: 6 months from start)
+ * @returns {Array} Array of ride data objects for future instances
+ */
+function generateRecurringRideInstances(originalRide, recurringEndDate = null) {
+  const instances = [];
+  const validRecurringValues = ['Weekly', 'Bi-Weekly', 'Monthly', 'Bi-Monthly', 'Yearly', 'Bi-Yearly'];
+  
+  if (!originalRide.recurring || !validRecurringValues.includes(originalRide.recurring)) {
+    return instances;
+  }
+
+  // Parse the original date
+  const originalDate = new Date(originalRide.Date);
+  const originalAppointmentTime = new Date(originalRide.appointmentTime);
+  
+  // Set default end date to 6 months from start if not provided
+  if (!recurringEndDate) {
+    recurringEndDate = new Date(originalDate);
+    recurringEndDate.setMonth(recurringEndDate.getMonth() + 6);
+  } else {
+    recurringEndDate = new Date(recurringEndDate);
+  }
+
+  // Generate instances until we reach the end date
+  let occurrenceNumber = 1;
+  let nextDate = calculateNextRecurringDate(originalDate, originalRide.recurring, occurrenceNumber);
+  
+  while (nextDate <= recurringEndDate) {
+    // Calculate the new appointment time (same time, new date)
+    const newAppointmentTime = new Date(nextDate);
+    newAppointmentTime.setHours(originalAppointmentTime.getHours());
+    newAppointmentTime.setMinutes(originalAppointmentTime.getMinutes());
+    newAppointmentTime.setSeconds(originalAppointmentTime.getSeconds());
+    newAppointmentTime.setMilliseconds(originalAppointmentTime.getMilliseconds());
+
+    // Create a copy of the original ride data
+    const instanceData = { ...originalRide };
+    
+    // Generate new UID for this instance
+    instanceData.UID = `ride_${Date.now()}_${Math.random().toString(36).substr(2, 9)}_${occurrenceNumber}`;
+    
+    // Update dates
+    instanceData.Date = nextDate;
+    instanceData.appointmentTime = newAppointmentTime;
+    
+    // Mark as recurring instance and link to parent
+    instanceData.isRecurringInstance = true;
+    instanceData.parentRideUID = originalRide.UID;
+    instanceData.recurringInstanceNumber = occurrenceNumber;
+    
+    // Reset timestamps
+    instanceData.CreatedAt = new Date();
+    instanceData.UpdatedAt = new Date();
+    
+    instances.push(instanceData);
+    
+    // Calculate next occurrence
+    occurrenceNumber++;
+    nextDate = calculateNextRecurringDate(originalDate, originalRide.recurring, occurrenceNumber);
+  }
+
+  return instances;
+}
+
 async function createRide(rideData) {
   try {
     // Define required fields
@@ -3050,22 +3210,81 @@ async function createRide(rideData) {
     // Set default values for optional fields
     if (!rideData.status) rideData.status = 'Scheduled';
     if (!rideData.tripType) rideData.tripType = 'RoundTrip';
-    if (rideData.wheelchair === undefined) rideData.wheelchair = false;
 
+    // Validate recurring field if provided
+    if (rideData.recurring !== undefined && rideData.recurring !== null) {
+      const validRecurringValues = ['Weekly', 'Bi-Weekly', 'Monthly', 'Bi-Monthly', 'Yearly', 'Bi-Yearly'];
+      if (!validRecurringValues.includes(rideData.recurring)) {
+        return {
+          success: false,
+          message: `Invalid recurring value. Must be one of: ${validRecurringValues.join(', ')}`
+        };
+      }
+      
+      // Mark as parent recurring ride
+      rideData.isRecurringParent = true;
+    }
+
+    // Remove wheelchair and wheelchairType fields if they exist
+    delete rideData.wheelchair;
+    delete rideData.wheelchairType;
+
+    // Create the original ride
     const result = await dataAccess.createRide(rideData);
 
-    if (result.success) {
-      return {
-        success: true,
-        message: 'Ride created successfully',
-        ride: result.ride
-      };
-    } else {
+    if (!result.success) {
       return {
         success: false,
         message: result.error || 'Failed to create ride'
       };
     }
+
+    // If this is a recurring ride, generate future instances
+    const createdRides = [result.ride];
+    let recurringInstances = [];
+    
+    if (rideData.recurring) {
+      // Parse recurringEndDate if provided (can be ISO string or Date)
+      let recurringEndDate = null;
+      if (rideData.recurringEndDate) {
+        recurringEndDate = new Date(rideData.recurringEndDate);
+      } else if (rideData.recurringCount) {
+        // If recurringCount is provided, calculate end date based on count
+        const maxDate = calculateNextRecurringDate(
+          new Date(rideData.Date), 
+          rideData.recurring, 
+          rideData.recurringCount
+        );
+        recurringEndDate = maxDate;
+      }
+
+      // Generate future instances
+      recurringInstances = generateRecurringRideInstances(rideData, recurringEndDate);
+      
+      // Create all recurring instances
+      for (const instanceData of recurringInstances) {
+        try {
+          const instanceResult = await dataAccess.createRide(instanceData);
+          if (instanceResult.success) {
+            createdRides.push(instanceResult.ride);
+          } else {
+            console.error(`Failed to create recurring instance ${instanceData.UID}:`, instanceResult.error);
+          }
+        } catch (error) {
+          console.error(`Error creating recurring instance ${instanceData.UID}:`, error);
+        }
+      }
+    }
+
+    return {
+      success: true,
+      message: rideData.recurring 
+        ? `Ride created successfully with ${recurringInstances.length} recurring instances`
+        : 'Ride created successfully',
+      ride: result.ride,
+      recurringInstances: recurringInstances.length > 0 ? createdRides.slice(1) : [],
+      totalRidesCreated: createdRides.length
+    };
   } catch (error) {
     console.error('Error in createRide:', error);
     return {
@@ -3235,6 +3454,85 @@ async function updateRideByUID(uid, updateData) {
   }
 }
 
+// Update ride by ID
+async function updateRideById(rideId, updateData) {
+  try {
+    // Define allowed fields based on schema
+    const allowedFields = [
+      "clientUID",
+      "additionalClient1_name",
+      "additionalClient1_rel",
+      "driverUID",
+      "dispatcherUID",
+      "startLocation",
+      "destinationUID",
+      "Date",
+      "appointmentTime",
+      "appointment_type",
+      "pickupTme",
+      "estimatedDuration",
+      "purpose",
+      "tripType",
+      "status",
+      "wheelchair",
+      "wheelchairType",
+      "milesDriven",
+      "volunteerHours",
+      "donationReceived",
+      "donationAmount",
+      "confirmation1_Date",
+      "confirmation1_By",
+      "confirmation2_Date",
+      "confirmation2_By",
+      "internalComment",
+      "externalComment",
+      "incidentReport",
+      "assignedTo",
+    ];
+
+    // Filter out any fields that are not allowed
+    const validUpdates = {};
+    for (const [key, value] of Object.entries(updateData)) {
+      if (allowedFields.includes(key)) {
+        validUpdates[key] = value;
+      }
+    }
+
+    if (Object.keys(validUpdates).length === 0) {
+      return {
+        success: false,
+        message: 'No valid fields to update'
+      };
+    }
+
+    // Add UpdatedAt timestamp
+    validUpdates.UpdatedAt = new Date();
+
+    const result = await dataAccess.updateRideById(rideId, validUpdates);
+
+    if (result.success) {
+      return {
+        success: true,
+        message: 'Ride updated successfully',
+        ride: result.ride,
+        updatedFields: Object.keys(validUpdates)
+      };
+    } else {
+      return {
+        success: false,
+        message: result.error || 'Failed to update ride'
+      };
+    }
+  } catch (error) {
+    console.error('Error in updateRideById:', error);
+    return {
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    };
+  }
+}
+
 // Assign a driver to a ride
 async function assignDriverToRide(rideId, volunteerId) {
   try {
@@ -3329,6 +3627,28 @@ async function getUnassignedRidesByOrganizationAndVolunteer(orgId, volunteerId) 
 }
 
 // Organization CRUD functions
+/**
+ * Helper function to parse name into first and last name
+ */
+function parseName(fullName) {
+  if (!fullName || typeof fullName !== 'string') {
+    return { first_name: '', last_name: '' };
+  }
+  
+  const parts = fullName.trim().split(/\s+/);
+  if (parts.length === 1) {
+    return { first_name: parts[0], last_name: '' };
+  } else if (parts.length === 2) {
+    return { first_name: parts[0], last_name: parts[1] };
+  } else {
+    // More than 2 parts - first is first name, last is last name, middle goes to first
+    return {
+      first_name: parts.slice(0, -1).join(' '),
+      last_name: parts[parts.length - 1]
+    };
+  }
+}
+
 async function createOrganization(orgData, authToken) {
   try {
     // Optional: Verify the JWT token if authToken is provided
@@ -3350,7 +3670,31 @@ async function createOrganization(orgData, authToken) {
       };
     }
 
-    // Define all allowed fields from schema
+    // Extract sys_admin fields before filtering (they won't be stored in org document)
+    const sysAdminRole = orgData.sys_admin_role;
+    const sysAdminPassword = orgData.sys_admin_password;
+    const primaryContact = {
+      name: orgData.pc_name,
+      email: orgData.pc_email,
+      phone: orgData.pc_phone_number,
+      address: orgData.pc_address,
+      address2: orgData.pc_address2,
+      city: orgData.pc_city,
+      state: orgData.pc_state,
+      zip: orgData.pc_zip
+    };
+    const secondaryContact = {
+      name: orgData.sc_name,
+      email: orgData.sc_email,
+      phone: orgData.sc_phone_number,
+      address: orgData.sc_address,
+      address2: orgData.sc_address2,
+      city: orgData.sc_city,
+      state: orgData.sc_state,
+      zip: orgData.sc_zip
+    };
+
+    // Define all allowed fields from schema (excluding sys_admin fields which are processed separately)
     const allowedFields = [
       'name',
       'org_id',
@@ -3393,7 +3737,7 @@ async function createOrganization(orgData, authToken) {
       'type_of_mobility'
     ];
 
-    // Filter to only include allowed fields
+    // Filter to only include allowed fields (excluding sys_admin_role and sys_admin_password)
     const filteredOrgData = {};
     for (const field of allowedFields) {
       if (orgData[field] !== undefined) {
@@ -3401,23 +3745,126 @@ async function createOrganization(orgData, authToken) {
       }
     }
 
+    // Create the organization
     const result = await dataAccess.createOrganization(filteredOrgData);
 
-    if (result.success) {
-      return {
-        success: true,
-        message: result.message,
-        data: {
-          orgId: result.orgId,
-          organizationId: result.organizationId
-        }
-      };
-    } else {
+    if (!result.success) {
       return {
         success: false,
         message: result.error || 'Failed to create organization'
       };
     }
+
+    const orgId = result.orgId;
+    const createdVolunteers = [];
+    const volunteerErrors = [];
+
+    // Create volunteers for primary and secondary contacts if provided
+    if (sysAdminRole && sysAdminPassword) {
+      // Create primary contact volunteer if email is provided
+      if (primaryContact.email) {
+        try {
+          const pcNameParts = parseName(primaryContact.name);
+          const primaryContactData = {
+            email_address: primaryContact.email,
+            password: sysAdminPassword,
+            role: [sysAdminRole],
+            organization: orgId,
+            first_name: pcNameParts.first_name,
+            last_name: pcNameParts.last_name,
+            phone_number: primaryContact.phone || '',
+            street_address: primaryContact.address || '',
+            address2: primaryContact.address2 || '',
+            city: primaryContact.city || '',
+            state: primaryContact.state || '',
+            zip: primaryContact.zip || ''
+          };
+
+          const pcResult = await createUserAccount(primaryContactData, null);
+          if (pcResult.success) {
+            createdVolunteers.push({
+              type: 'primary_contact',
+              userId: pcResult.userId,
+              userID: pcResult.userID,
+              email: primaryContact.email
+            });
+          } else {
+            volunteerErrors.push({
+              type: 'primary_contact',
+              error: pcResult.message || 'Failed to create primary contact volunteer'
+            });
+          }
+        } catch (error) {
+          console.error('Error creating primary contact volunteer:', error);
+          volunteerErrors.push({
+            type: 'primary_contact',
+            error: error.message
+          });
+        }
+      }
+
+      // Create secondary contact volunteer if email is provided
+      if (secondaryContact.email) {
+        try {
+          const scNameParts = parseName(secondaryContact.name);
+          const secondaryContactData = {
+            email_address: secondaryContact.email,
+            password: sysAdminPassword,
+            role: [sysAdminRole],
+            organization: orgId,
+            first_name: scNameParts.first_name,
+            last_name: scNameParts.last_name,
+            phone_number: secondaryContact.phone || '',
+            street_address: secondaryContact.address || '',
+            address2: secondaryContact.address2 || '',
+            city: secondaryContact.city || '',
+            state: secondaryContact.state || '',
+            zip: secondaryContact.zip || ''
+          };
+
+          const scResult = await createUserAccount(secondaryContactData, null);
+          if (scResult.success) {
+            createdVolunteers.push({
+              type: 'secondary_contact',
+              userId: scResult.userId,
+              userID: scResult.userID,
+              email: secondaryContact.email
+            });
+          } else {
+            volunteerErrors.push({
+              type: 'secondary_contact',
+              error: scResult.message || 'Failed to create secondary contact volunteer'
+            });
+          }
+        } catch (error) {
+          console.error('Error creating secondary contact volunteer:', error);
+          volunteerErrors.push({
+            type: 'secondary_contact',
+            error: error.message
+          });
+        }
+      }
+    }
+
+    // Build response message
+    let message = result.message;
+    if (createdVolunteers.length > 0) {
+      message += `. Created ${createdVolunteers.length} volunteer(s) with ${sysAdminRole} role.`;
+    }
+    if (volunteerErrors.length > 0) {
+      message += ` Warning: ${volunteerErrors.length} volunteer creation(s) failed.`;
+    }
+
+    return {
+      success: true,
+      message: message,
+      data: {
+        orgId: orgId,
+        organizationId: orgId,
+        createdVolunteers: createdVolunteers,
+        volunteerErrors: volunteerErrors.length > 0 ? volunteerErrors : undefined
+      }
+    };
   } catch (error) {
     console.error('Error in createOrganization:', error);
     return {
@@ -3856,7 +4303,8 @@ async function resetUserPassword(userID, newPassword, authToken) {
 module.exports = { 
   loginUser, 
   createRoleWithPermissions,
-  createPermissionForRole, 
+  createPermissionForRole,
+  updateRole, 
   getParentRole,
   getParentRoleView,
   verifyToken, 
@@ -3876,6 +4324,7 @@ module.exports = {
   getAllRidesAppointmentInfo,
   getRideByUID,
   updateRideByUID,
+  updateRideById,
   assignDriverToRide,
   parseDriverAvailability,
   parseRideDateTime,
