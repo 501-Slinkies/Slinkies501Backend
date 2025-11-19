@@ -1,5 +1,5 @@
 // Firebase.js - This file handles the database connection and configuration.
-require("dotenv").config();
+
 const { initializeApp, cert } = require("firebase-admin/app");
 const { getFirestore } = require("firebase-admin/firestore");
 const admin = require("firebase-admin");
@@ -14,7 +14,7 @@ if (!admin.apps.length) {
         console.log("Firebase Admin connected to Firestore Emulator");
     } else {
         // Otherwise, connect to the live production database
-        const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
+        const serviceAccount = require("./serviceAccountKey.json");
         initializeApp({
             credential: cert(serviceAccount),
         });
