@@ -12,13 +12,22 @@ if (!admin.apps.length) {
             projectId: "dev-project", // A dummy project ID is fine for the emulator
         });
         console.log("Firebase Admin connected to Firestore Emulator");
+    } else if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
+        // If the service account key is provided as an environment variable
+        try {
+            const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
+            initializeApp({
+                credential: cert(serviceAccount),
+            });
+            console.log("Firebase Admin connected to Production Firestore using environment variable.");
+        } catch (error) {
+            console.error("Error parsing FIREBASE_SERVICE_ACCOUNT_KEY from environment variable:", error.message);
+            process.exit(1);
+        }
     } else {
-        // Otherwise, connect to the live production database
-        const serviceAccount = require("./serviceAccountKey.json");
-        initializeApp({
-            credential: cert(serviceAccount),
-        });
-        console.log("Firebase Admin connected to Production Firestore");
+        console.error("Firebase service account key not found.");
+        console.error("Please ensure the FIREBASE_SERVICE_ACCOUNT_KEY is set in your .env file.");
+        process.exit(1);
     }
 }
 

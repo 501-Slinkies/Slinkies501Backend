@@ -46,15 +46,10 @@ async function login(username, password) {
       continue;
     }
 
-<<<<<<< HEAD
-    // Support both hashed passwords (preferred) and legacy plain-text passwords.
-    if (storedPassword === hashedInput || storedPassword === password) {
-=======
     // Only allow hashed password comparison for security
     // SECURITY: Removed plain-text password fallback to prevent credential exposure
     // If you have legacy plain-text passwords, run a migration to hash them first
     if (storedPassword === hashedInput) {
->>>>>>> e0cfd93d832874a94b86d735a9289d7c6fcc2a6e
       user = { id: doc.id, ...userData };
       break;
     }
