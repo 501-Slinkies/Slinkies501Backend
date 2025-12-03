@@ -11,6 +11,7 @@ const volunteersRouter = require("./routes/volunteers");
 const { verifyAddress, getRoute } = require("./integrations/maps");
 const { sendNotification } = require("./services/notifications");
 const reportsRouter = require("./routes/reports");
+const { checkPermission } = require("./middleware/permissionMiddleware");
 
 
 const app = express();
@@ -51,7 +52,13 @@ app.use(express.urlencoded({ extended: true }));
 app.use(bodyParser.json()); 
 app.use(bodyParser.urlencoded({ extended: true }));
 
-
+// ================================
+// Permission Middleware
+// ================================
+// Apply permission checking to all routes except /api/login
+// The middleware will automatically exclude /api/login and other utility endpoints
+// IMPORTANT: This must be before route definitions to apply to all routes
+app.use(checkPermission);
 
 app.use("/api/volunteers", volunteersRouter);
 // ================================

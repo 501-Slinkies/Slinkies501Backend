@@ -13,7 +13,13 @@ http://localhost:3000
    ```
    Server should be running on `http://localhost:3000`
 
-2. **Authentication Token** (optional for most endpoints):
+2. **Permission System** (REQUIRED for all endpoints except `/api/login`):
+   - All API endpoints require `org_id` and `selected_role_name` parameters
+   - **For POST/PUT/PATCH requests:** Include in request body
+   - **For GET/DELETE requests:** Include as query parameters
+   - See [Permission System Documentation](./docs/PERMISSION_SYSTEM.md) for details
+
+3. **Authentication Token** (optional for most endpoints):
    - Get a token by logging in via `POST /api/login`
    - Include in headers: `Authorization: Bearer YOUR_TOKEN`
 
@@ -975,6 +981,8 @@ Creates a new organization. When `sys_admin_role` and `sys_admin_password` are p
 #### Request Body (Full Example with Volunteer Creation)
 ```json
 {
+  "org_id": "GST-TRANS-001",
+  "selected_role_name": "admin",
   "name": "Greater Southern Tier Transportation Services",
   "org_id": "GST-TRANS-001",
   "address": "123 Main Street",
@@ -1015,9 +1023,13 @@ Creates a new organization. When `sys_admin_role` and `sys_admin_password` are p
 #### Request Body (Minimal Example - Only Required Fields)
 ```json
 {
+  "org_id": "test-org",
+  "selected_role_name": "admin",
   "short_name": "Test Organization"
 }
 ```
+
+**Note:** `org_id` and `selected_role_name` are required for permission checking. The role must have `create_org` permission.
 
 #### Request Body (With Volunteer Creation)
 ```json
@@ -1137,14 +1149,16 @@ GET /api/organizations/:orgId
 
 #### Examples
 ```
-GET /api/organizations/firestore-document-id-here
-GET /api/organizations/GST-TRANS-001
+GET /api/organizations/firestore-document-id-here?org_id=test-org&selected_role_name=coordinator
+GET /api/organizations/GST-TRANS-001?org_id=GST-TRANS-001&selected_role_name=coordinator
 ```
 
 #### Headers
 ```
 Authorization: Bearer YOUR_TOKEN (optional)
 ```
+
+**Note:** `org_id` and `selected_role_name` are required as query parameters for permission checking. The role must have `read_org` permission.
 
 #### Expected Response (Success - 200)
 ```json
@@ -1177,11 +1191,15 @@ Authorization: Bearer YOUR_TOKEN (optional)
 #### Request Body (Partial Update Example)
 ```json
 {
+  "org_id": "GST-TRANS-001",
+  "selected_role_name": "coordinator",
   "phone_number": "607-555-9999",
   "email": "newemail@gsttransport.org",
   "website": "https://www.newwebsite.org"
 }
 ```
+
+**Note:** `org_id` and `selected_role_name` are required for permission checking. The role must have `update_org` permission.
 
 #### Expected Response (Success - 200)
 ```json
@@ -1239,14 +1257,16 @@ Returns all unassigned rides for a specific volunteer within an organization whe
 
 #### Examples
 ```
-GET /api/organizations/bripen/volunteers/zvco96u8CWM2ryR1CyKvyJ17VHC3/unassigned-rides
-GET /api/organizations/GST-TRANS-001/volunteers/volunteer-firebase-id/unassigned-rides
+GET /api/organizations/bripen/volunteers/zvco96u8CWM2ryR1CyKvyJ17VHC3/unassigned-rides?org_id=bripen&selected_role_name=coordinator
+GET /api/organizations/GST-TRANS-001/volunteers/volunteer-firebase-id/unassigned-rides?org_id=GST-TRANS-001&selected_role_name=coordinator
 ```
 
 #### Headers
 ```
 Authorization: Bearer YOUR_TOKEN (optional)
 ```
+
+**Note:** `org_id` and `selected_role_name` are required as query parameters for permission checking. The role must have `read_rides` permission.
 
 #### Expected Response (Success - 200)
 ```json
@@ -1329,13 +1349,15 @@ GET /api/drivers/:driverID/rides
 
 #### Example
 ```
-GET /api/drivers/driver-firebase-id/rides
+GET /api/drivers/driver-firebase-id/rides?org_id=test-org&selected_role_name=coordinator
 ```
 
 #### Headers
 ```
 Authorization: Bearer YOUR_TOKEN (optional)
 ```
+
+**Note:** `org_id` and `selected_role_name` are required as query parameters for permission checking. The role must have `read_rides` permission.
 
 #### Expected Response (Success - 200)
 ```json
@@ -1402,6 +1424,8 @@ Each generated instance is a separate ride document with:
 #### Request Body (Required Fields)
 ```json
 {
+  "org_id": "test-org",
+  "selected_role_name": "coordinator",
   "clientUID": "client123",
   "Date": "2025-01-15",
   "appointmentTime": "2025-01-15T10:00:00Z",
@@ -1410,9 +1434,13 @@ Each generated instance is a separate ride document with:
 }
 ```
 
+**Note:** `org_id` and `selected_role_name` are required for permission checking. The role must have `create_rides` permission.
+
 #### Request Body (Full Example with Optional Fields)
 ```json
 {
+  "org_id": "test-org",
+  "selected_role_name": "coordinator",
   "clientUID": "client123",
   "Date": "2025-01-15",
   "appointmentTime": "2025-01-15T10:00:00Z",
@@ -1573,10 +1601,10 @@ GET /api/rides/:rideId/match-drivers
 
 #### Example
 ```
-GET /api/rides/firestore-ride-id/match-drivers
+GET /api/rides/firestore-ride-id/match-drivers?org_id=test-org&selected_role_name=coordinator
 ```
 
-**Note:** This endpoint accepts either a Firestore document ID or a ride UID.
+**Note:** This endpoint accepts either a Firestore document ID or a ride UID. `org_id` and `selected_role_name` are required as query parameters for permission checking. The role must have `read_rides` permission.
 
 #### Headers
 ```
@@ -1651,8 +1679,10 @@ GET /api/rides/calendar
 
 #### Example
 ```
-GET /api/rides/calendar?start=2025-09-01&end=2025-12-31&status=unassigned
+GET /api/rides/calendar?org_id=test-org&selected_role_name=coordinator&start=2025-09-01&end=2025-12-31&status=unassigned
 ```
+
+**Note:** `org_id` and `selected_role_name` are required as query parameters for permission checking. The role must have `read_rides` permission.
 
 #### Expected Response (Success - 200)
 ```json
@@ -1694,8 +1724,10 @@ GET /api/calendar
 
 #### Example
 ```
-GET /api/calendar?startDate=2025-09-01&endDate=2025-12-31
+GET /api/calendar?org_id=test-org&selected_role_name=coordinator&startDate=2025-09-01&endDate=2025-12-31
 ```
+
+**Note:** `org_id` and `selected_role_name` are required as query parameters for permission checking. The role must have `read_rides` permission.
 
 #### Expected Response (Success - 200)
 ```json
@@ -1937,8 +1969,10 @@ GET /api/clients/:clientId/donations
 
 #### Example
 ```
-GET /api/clients/client-firebase-id/donations
+GET /api/clients/client-firebase-id/donations?org_id=test-org&selected_role_name=coordinator
 ```
+
+**Note:** `org_id` and `selected_role_name` are required as query parameters for permission checking. The role must have `read_clients` permission.
 
 #### Expected Response (Success - 200)
 ```json
@@ -1991,6 +2025,8 @@ Content-Type: application/json
 #### Request Body (Single Entry)
 ```json
 {
+  "org_id": "test-org",
+  "selected_role_name": "coordinator",
   "repeated": false,
   "unavailabilityString": "2025-09-20 09:00 AM to 2025-09-20 05:00 PM",
   "effectiveFrom": "2025-09-20T09:00:00Z",
@@ -1998,6 +2034,8 @@ Content-Type: application/json
   "source": "api"
 }
 ```
+
+**Note:** `org_id` and `selected_role_name` are required for permission checking. The role must have `update_volunteers` permission.
 
 #### Request Body (Multiple Entries)
 ```json
@@ -2068,8 +2106,10 @@ GET /api/reports
 
 #### Example
 ```
-GET /api/reports?client_name=true&ride_status=true&start=2025-01-01&end=2025-12-31
+GET /api/reports?org_id=test-org&selected_role_name=coordinator&client_name=true&ride_status=true&start=2025-01-01&end=2025-12-31
 ```
+
+**Note:** `org_id` and `selected_role_name` are required as query parameters for permission checking. The role must have `read_logs` permission.
 
 #### Expected Response (Success - 200)
 ```json
@@ -2121,10 +2161,14 @@ Content-Type: application/json
 #### Request Body
 ```json
 {
+  "org_id": "test-org",
+  "selected_role_name": "coordinator",
   "user_id": "user-firebase-id",
   "selectedParams": ["client_name", "ride_status", "trip_mileage"]
 }
 ```
+
+**Note:** `org_id` and `selected_role_name` are required for permission checking. The role must have `read_logs` permission.
 
 #### Expected Response (Success - 200)
 ```json
@@ -2144,13 +2188,19 @@ GET /api/reports/:user_id
 
 #### Example
 ```
-GET /api/reports/user-firebase-id
+GET /api/reports/user-firebase-id?org_id=test-org&selected_role_name=coordinator&start=2025-01-01&end=2025-12-31
 ```
+
+#### Query Parameters (Required)
+- `org_id`: Organization ID
+- `selected_role_name`: Role name for permission checking
 
 #### Query Parameters (Optional)
 - `start`: Start date (ISO format)
 - `end`: End date (ISO format)
 - `organization`: Filter by organization
+
+**Note:** The role must have `read_logs` permission.
 
 #### Expected Response (Success - 200)
 ```json
@@ -2172,11 +2222,16 @@ GET /api/reports/user-firebase-id
 Create a Postman environment with:
 - `base_url`: `http://localhost:3000`
 - `auth_token`: `your-jwt-token` (set after login)
-- `test_org_id`: `TEST-ORG-001`
+- `test_org_id`: `TEST-ORG-001` (required for permission checking)
+- `test_role_name`: `admin` or `coordinator` (required for permission checking)
 - `test_org_doc_id`: `firestore-document-id` (save after creation)
 - `test_user_id`: `USER-001` (save after creation)
 - `test_ride_id`: `ride-firebase-id` (save after creation)
 - `test_driver_id`: `driver-firebase-id` (save after creation)
+
+**Important:** All requests (except `/api/login`) require `org_id` and `selected_role_name`:
+- For POST/PUT/PATCH: Include in request body as `org_id` and `selected_role_name`
+- For GET/DELETE: Include as query parameters `?org_id={{test_org_id}}&selected_role_name={{test_role_name}}`
 
 ### Tests Script Examples (Postman Tests Tab)
 
@@ -2259,6 +2314,8 @@ Content-Type: application/json
 Authorization: Bearer {{auth_token}}
 
 {
+  "org_id": "QUICK-001",
+  "selected_role_name": "admin",
   "name": "Quick Test Org",
   "org_id": "QUICK-001"
 }
@@ -2266,13 +2323,13 @@ Authorization: Bearer {{auth_token}}
 
 ### Get All Organizations
 ```
-GET http://localhost:3000/api/organizations
+GET http://localhost:3000/api/organizations?org_id={{test_org_id}}&selected_role_name={{test_role_name}}
 Authorization: Bearer {{auth_token}}
 ```
 
 ### Match Drivers for Ride
 ```
-GET http://localhost:3000/api/rides/{{test_ride_id}}/match-drivers
+GET http://localhost:3000/api/rides/{{test_ride_id}}/match-drivers?org_id={{test_org_id}}&selected_role_name={{test_role_name}}
 Authorization: Bearer {{auth_token}}
 ```
 
@@ -2283,6 +2340,8 @@ Content-Type: application/json
 Authorization: Bearer {{auth_token}}
 
 {
+  "org_id": "bripen",
+  "selected_role_name": "admin",
   "name": "coordinator",
   "org_id": "bripen",
   "parentRole": "default_coordinator"
@@ -2296,6 +2355,8 @@ Content-Type: application/json
 Authorization: Bearer {{auth_token}}
 
 {
+  "org_id": "bripen",
+  "selected_role_name": "admin",
   "roleName": "coordinator",
   "create_clients": true,
   "read_clients": true,
@@ -2323,13 +2384,13 @@ Authorization: Bearer {{auth_token}}
 
 ### Get Parent Role View
 ```
-GET http://localhost:3000/api/roles/bripen_dispatcher/parent/view
+GET http://localhost:3000/api/roles/bripen_dispatcher/parent/view?org_id=bripen&selected_role_name=admin
 Authorization: Bearer {{auth_token}}
 ```
 
 ### Get Rides Calendar
 ```
-GET http://localhost:3000/api/rides/calendar?start=2025-09-01&end=2025-12-31&status=scheduled
+GET http://localhost:3000/api/rides/calendar?org_id={{test_org_id}}&selected_role_name={{test_role_name}}&start=2025-09-01&end=2025-12-31&status=scheduled
 ```
 
 ### Verify Address
@@ -2361,7 +2422,7 @@ Content-Type: application/json
 
 ### Get Unassigned Rides for Organization and Volunteer
 ```
-GET http://localhost:3000/api/organizations/bripen/volunteers/zvco96u8CWM2ryR1CyKvyJ17VHC3/unassigned-rides
+GET http://localhost:3000/api/organizations/bripen/volunteers/zvco96u8CWM2ryR1CyKvyJ17VHC3/unassigned-rides?org_id=bripen&selected_role_name=coordinator
 ```
 
 ---

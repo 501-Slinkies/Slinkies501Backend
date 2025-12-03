@@ -44,16 +44,26 @@
 				],
 				"body": {
 					"mode": "raw",
-					"raw": "{\n  \"name\": \"Test Organization\",\n  \"org_id\": \"TEST-ORG-{{$randomInt}}\"\n}"
+					"raw": "{\n  \"org_id\": \"{{test_org_id}}\",\n  \"selected_role_name\": \"{{test_role_name}}\",\n  \"name\": \"Test Organization\",\n  \"org_id\": \"TEST-ORG-{{$randomInt}}\"\n}"
 				},
 				"url": {
-					"raw": "{{base_url}}/api/organizations",
+					"raw": "{{base_url}}/api/organizations?org_id={{test_org_id}}&selected_role_name={{test_role_name}}",
 					"host": [
 						"{{base_url}}"
 					],
 					"path": [
 						"api",
 						"organizations"
+					],
+					"query": [
+						{
+							"key": "org_id",
+							"value": "{{test_org_id}}"
+						},
+						{
+							"key": "selected_role_name",
+							"value": "{{test_role_name}}"
+						}
 					]
 				}
 			},
@@ -95,13 +105,23 @@
 					"raw": "{\n  \"name\": \"Greater Southern Tier Transportation Services\",\n  \"org_id\": \"GST-TRANS-{{$randomInt}}\",\n  \"address\": \"123 Main Street\",\n  \"email\": \"info{{$randomInt}}@gsttransport.org\",\n  \"short_name\": \"GST Transport\",\n  \"phone_number\": \"607-555-0100\",\n  \"lisence_number\": \"NY-12345\",\n  \"website\": \"https://www.gsttransport.org\",\n  \"address2\": \"Suite 100\",\n  \"city\": \"Elmira\",\n  \"state\": \"NY\",\n  \"zip\": \"14901\",\n  \"pc_name\": \"John Smith\",\n  \"pc_phone_number\": \"607-555-0101\",\n  \"pc_email\": \"john.smith@gsttransport.org\",\n  \"pc_address\": \"123 Main Street\",\n  \"pc_address2\": \"Suite 100\",\n  \"pc_city\": \"Elmira\",\n  \"pc_state\": \"NY\",\n  \"pc_zip\": \"14901\",\n  \"sc_name\": \"Jane Doe\",\n  \"sc_phone_number\": \"607-555-0102\",\n  \"sc_email\": \"jane.doe@gsttransport.org\",\n  \"sc_address\": \"123 Main Street\",\n  \"sc_address2\": \"Suite 100\",\n  \"sc_city\": \"Elmira\",\n  \"sc_state\": \"NY\",\n  \"sc_zip\": \"14901\",\n  \"sys_admin_phone_number\": \"607-555-0103\",\n  \"sys_admin_user_id\": \"admin-user-001\",\n  \"sys_admin_security_level\": \"Super Admin\"\n}"
 				},
 				"url": {
-					"raw": "{{base_url}}/api/organizations",
+					"raw": "{{base_url}}/api/organizations?org_id={{test_org_id}}&selected_role_name={{test_role_name}}",
 					"host": [
 						"{{base_url}}"
 					],
 					"path": [
 						"api",
 						"organizations"
+					],
+					"query": [
+						{
+							"key": "org_id",
+							"value": "{{test_org_id}}"
+						},
+						{
+							"key": "selected_role_name",
+							"value": "{{test_role_name}}"
+						}
 					]
 				}
 			},
@@ -132,13 +152,23 @@
 				"method": "GET",
 				"header": [],
 				"url": {
-					"raw": "{{base_url}}/api/organizations",
+					"raw": "{{base_url}}/api/organizations?org_id={{test_org_id}}&selected_role_name={{test_role_name}}",
 					"host": [
 						"{{base_url}}"
 					],
 					"path": [
 						"api",
 						"organizations"
+					],
+					"query": [
+						{
+							"key": "org_id",
+							"value": "{{test_org_id}}"
+						},
+						{
+							"key": "selected_role_name",
+							"value": "{{test_role_name}}"
+						}
 					]
 				}
 			},
@@ -431,13 +461,23 @@
 					"raw": "{\n  \"name\": \"Duplicate Test\",\n  \"org_id\": \"{{org_id}}\"\n}"
 				},
 				"url": {
-					"raw": "{{base_url}}/api/organizations",
+					"raw": "{{base_url}}/api/organizations?org_id={{test_org_id}}&selected_role_name={{test_role_name}}",
 					"host": [
 						"{{base_url}}"
 					],
 					"path": [
 						"api",
 						"organizations"
+					],
+					"query": [
+						{
+							"key": "org_id",
+							"value": "{{test_org_id}}"
+						},
+						{
+							"key": "selected_role_name",
+							"value": "{{test_role_name}}"
+						}
 					]
 				}
 			},
@@ -513,13 +553,23 @@
 					"raw": "{\n  \"email\": \"test@example.com\"\n}"
 				},
 				"url": {
-					"raw": "{{base_url}}/api/organizations",
+					"raw": "{{base_url}}/api/organizations?org_id={{test_org_id}}&selected_role_name={{test_role_name}}",
 					"host": [
 						"{{base_url}}"
 					],
 					"path": [
 						"api",
 						"organizations"
+					],
+					"query": [
+						{
+							"key": "org_id",
+							"value": "{{test_org_id}}"
+						},
+						{
+							"key": "selected_role_name",
+							"value": "{{test_role_name}}"
+						}
 					]
 				}
 			},

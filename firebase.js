@@ -15,13 +15,23 @@ if (!admin.apps.length) {
     } else if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
         // If the service account key is provided as an environment variable
         try {
-            const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
+            let serviceAccount;
+            // Check if it's base64 encoded
+            if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY.startsWith('eyJ')) {
+                // Base64 encoded JSON
+                const decoded = Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_KEY, 'base64').toString('utf-8');
+                serviceAccount = JSON.parse(decoded);
+            } else {
+                // Plain JSON string
+                serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
+            }
             initializeApp({
                 credential: cert(serviceAccount),
             });
             console.log("Firebase Admin connected to Production Firestore using environment variable.");
         } catch (error) {
             console.error("Error parsing FIREBASE_SERVICE_ACCOUNT_KEY from environment variable:", error.message);
+            console.error("Tip: Ensure the JSON is valid. If using multi-line JSON, use base64 encoding or put it on a single line.");
             process.exit(1);
         }
     } else {
