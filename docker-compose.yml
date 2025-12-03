@@ -1,0 +1,30 @@
+services:
+  # Service 1: The Node.js Backend
+  backend:
+    build:
+      context: ./backend  # Tells Compose to build using the 'backend/Dockerfile'
+      dockerfile: backend.Dockerfile
+    container_name: axo-lift-backend
+    restart: unless-stopped
+    environment:
+      # Pass the path to your service key as an environment variable
+      # This is how your Node.js app finds its credentials
+      GOOGLE_APPLICATION_CREDENTIALS: /usr/src/app/serviceAccountKey.json
+    volumes:
+      # Mount the service key from your host into the container
+      # This is more secure than copying it into the image
+      - ./backend/serviceAccountKey.json:/usr/src/app/serviceAccountKey.json:ro
+    # We don't need 'ports' here, as Nginx will be the only public-facing part
+
+  # Service 2: The Nginx Frontend & Proxy
+  frontend:
+    build:
+      context: . # Sets the context to the root directory (/var/www/axo-lift)
+      dockerfile: nginx/Dockerfile  # Tells Compose to build using the 'nginx/Dockerfile'
+    container_name: axo-lift-frontend
+    restart: unless-stopped
+    ports:
+      # Map the VM's port 80 to the container's port 80
+      - "80:80"
+    depends_on:
+      - backend  # Tells Compose to start the backend before the frontend

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "28119792445",
+    "project_id": "slinkies-43455",
+    "storage_bucket": "slinkies-43455.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:28119792445:android:309d7363a6cfae0f59a354",
+        "android_client_info": {
+          "package_name": "com.mycompany.slinkies"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC2L47_mtzfn7iJVFIZSPXgUnFajO-Jfcw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
